@@ -1,0 +1,146 @@
+/* Container + base */
+.teacher-page {
+  font-family: Arial, sans-serif;
+  color: #102233;
+  background: #f4f7fb;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+.teacher-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 22px;
+  position: sticky;
+  top: 0;
+  background: transparent;
+  z-index: 100;
+}
+.teacher-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #102233;
+}
+.teacher-header .owner { font-weight: 400; color: #1a73e8; margin-left: 8px; font-size: 12px; }
+.header-actions .link-btn {
+  background: none;
+  border: none;
+  color: #102233;        /* same as header text */
+  cursor: pointer;
+  font-weight: 700;     /* bold like teacher.html */
+  font-size: 14px;
+  font-family: Arial, sans-serif;
+}
+
+
+/* Main layout */
+.teacher-main {
+  padding: 32px 18px 28px;
+  flex: 1;
+}
+.teacher-container {
+  max-width: 560px;     /* reduced width */
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: stretch;
+}
+
+
+/* Hero text */
+.icon { font-size: 40px; margin-bottom: 6px; text-align: center; }
+.teacher-title { margin: 0; font-size: 22px; font-weight: 700; color: #0b2a44; }
+.teacher-para { margin: 6px 0 10px; color: #526577; text-align: center; max-width: 720px; }
+
+/* Card */
+.card {
+  background: #fff;
+  width: 100%;
+  padding: 22px;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  border: 1px solid #e9eef3;
+}
+.card h3 { margin: 0 0 6px; font-size: 18px; color: #0b2a44; }
+.hint { color: #777; margin-bottom: 12px; font-size: 14px; }
+
+/* Form */
+.card form label { display:block; margin: 10px 0 6px; font-weight: 600; color: #0b2a44; }
+.card form input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  margin-bottom: 8px;
+  outline: none;
+  transition: border-color .18s;
+}
+.card form input:focus { border-color: #494eea; box-shadow: 0 6px 18px rgba(73,78,234,0.06); }
+
+/* Buttons */
+.create-btn {
+  display:block;
+  width: 100%;
+  padding: 12px;
+  background: #0b63ff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 10px;
+  font-weight: 700;
+}
+.create-btn[disabled] { opacity: 0.6; cursor: default; }
+
+/* small row */
+.small-row { margin-top: 12px; display:flex; gap:8px; align-items:center; }
+.toggle-link {
+  background: none;
+  border: none;
+  color: #0b63ff;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* messages */
+.msg { margin-top: 12px; color: #c0392b; font-weight: 600; }
+
+/* footer */
+.teacher-footer {
+  padding: 18px;
+  background: transparent;
+  color: #6b7b86;
+  border-top: none;
+  position: relative;     /* IMPORTANT */
+  min-height: 80px;
+}
+
+.teacher-footer .social-links {
+  position: absolute;
+  right: 18px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.teacher-footer .social-links img {
+  width: 26px;
+  cursor: pointer;
+  transition: transform .18s;
+}
+
+.teacher-footer .social-links img:hover { transform: translateY(-3px); }
+
+/* responsive */
+@media (max-width: 720px) {
+  .card { padding: 16px; }
+  .teacher-main { padding: 18px 10px; }
+  .teacher-title { font-size: 20px; }
+}

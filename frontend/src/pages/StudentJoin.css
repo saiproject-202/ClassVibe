@@ -1,0 +1,131 @@
+/* StudentJoin.css - minimal styles to match your student.html layout */
+
+.student-page {
+  font-family: Arial, sans-serif;
+  color: #102233;
+  background: #f4f7fb;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.student-header {
+  padding: 12px 18px;
+  position: sticky;
+  top: 0;
+  background: transparent;
+  z-index: 100;
+}
+.header-bar {
+  display:flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+.back-link {
+  background: none;
+  border: none;
+  color: #0b63ff;
+  cursor: pointer;
+  font-weight: 600;
+  margin-left: 12px;
+}
+
+/* Main */
+.student-main { flex: 1; padding: 24px 16px; }
+.container1 {
+  max-width: 980px;
+  margin: 0 auto;
+  text-align: center;
+  display:flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+}
+.container1 .big-icon { width: 72px; height: 72px; object-fit: contain; }
+
+.para { margin: 0; }
+.para p { margin: 6px 0 0; color: #526577; font-size: 14px; }
+
+/* row of cards */
+.row1 { display:flex; gap: 18px; flex-wrap: wrap; justify-content: center; align-items: flex-start; margin-top: 12px; }
+.col-2 { width: 320px; max-width:100%; }
+.role-card {
+  background:#fff;
+  border-radius:12px;
+  padding:16px;
+  text-align:center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  border:1px solid #e9eef3;
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:center;
+}
+.role-card h2 { margin:6px 0; font-size:20px; color:#0b2a44; }
+.role-card p { margin:0; color:#566973; font-size:14px; }
+.role-card .big-icon { width: 48px; height: 48px; }
+
+/* card button */
+.card-btn {
+  margin-top: 10px;
+  padding: 10px 14px;
+  border-radius: 24px;
+  border: none;
+  background: #0b63ff;
+  color: white;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* pin form (reuses .card look) */
+.pin-form.card {
+  margin-top: 18px;
+  max-width: 520px;
+}
+.pin-form label { display:block; margin: 8px 0 6px; font-weight: 600; color: #0b2a44; }
+.pin-form input { width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 8px; outline: none; }
+.create-btn { display:block; width: 100%; padding: 12px; background: #0b63ff; color: #fff; border: none; border-radius: 8px; cursor: pointer; margin-top: 10px; font-weight: 700; }
+.create-btn[disabled] { opacity: 0.6; cursor: default; }
+
+/* messages */
+.msg { margin-top: 12px; padding: 10px; border-radius: 6px; font-weight: 600; }
+.msg.error { background: #fff0f0; color: #c0392b; }
+.msg.success { background: #f0fff4; color: #0f6f3f; }
+
+/* footer */
+.student-footer { padding: 18px; text-align: center; background: transparent; color: #6b7b86; border-top:none; position: relative; min-height:80px; }
+.student-footer .social-links { position: absolute; right: 18px; top: 50%; transform: translateY(-50%); display:flex; flex-direction:column; gap:12px; }
+.student-footer .social-links img { width: 28px; }
+
+/* responsive */
+@media (max-width: 720px) {
+  .row1 { flex-direction: column; }
+  .student-footer .social-links { position: static; flex-direction: row; justify-content: center; transform: none; margin-top: 12px; }
+}
+/* scanner styles */
+.scanner {
+  margin-top: 18px;
+  text-align: center;
+  padding: 12px;
+}
+.scanner-top {
+  display:flex;
+  justify-content: space-between;
+  align-items:center;
+  gap:12px;
+  margin-bottom: 8px;
+}
+.scanner-video {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  border-radius: 8px;
+  background: #000;
+  object-fit: cover;
+}
+.card-btn.small {
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+}

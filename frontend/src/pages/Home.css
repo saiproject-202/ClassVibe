@@ -1,0 +1,205 @@
+.title{
+  text-align:center;
+  font-size:30px;
+}
+
+/* Basic reset */
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+body {
+  min-height: 100vh;
+  overflow-y: auto;
+}
+
+/* Page background (subtle) */
+body {
+  background: #f4f7fb;
+  color: #102233;
+  line-height: 1.4;
+}
+
+/* Header: fixed top-left, small */
+header {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 1000;
+  background: transparent;
+  padding: 0;
+}
+header h2{
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: #102233;
+}
+.header-bar a {
+  background: #e0e0e0;   /* light grey */
+  color: #000;            /* black text */
+  padding: 6px 10px;      /* button shape */
+  border-radius: 6px;     /* smooth corners */
+  text-decoration: none;
+  font-size: 14px;  /* remove underline */
+  transition: 0.3s;
+}
+
+.header-bar a:hover {
+  background: orange;     /* hover color */
+  color: #fff;            /* white text on hover */
+}
+
+/* Prevent content hiding behind fixed header */
+main { padding-top: 64px; }
+
+/* Page container / hero */
+.home {
+  max-width: 1100px;
+  margin: 18px auto;
+  padding: 0 16px;
+}
+
+/* Main title */
+h1 {
+  text-align: center;
+  font-size: 44px;
+  margin: 28px 0 10px;
+  color: #0b2a44;
+}
+#name { 
+    -webkit-text-stroke: 1px #32719b;
+    color: aliceblue;
+    font-weight: 300;
+ }
+
+/* Subtitles */
+.sub1 { text-align:center; color:#526577; max-width:640px; margin: 0 auto 30px; padding: 0 8px; font-size:18px; }
+.sub2 { text-align:center; color:#6b7b86; margin-bottom:24px; }
+
+/* Row helpers (simple flex) */
+.row, .row1 {
+ display: flex;
+  flex-wrap:wrap;
+  gap:18px;
+  justify-content:center;
+  align-items:flex-start;
+}
+
+/* Column widths */
+.col-1 { width:300px; max-width:100%; flex: 1 1 280px; max-width: 340px;}
+.col-2 { width:320px; max-width:100%; }
+.mid{
+    text-align: center;
+}
+/* Feature card (simple) */
+.feature-row {
+  display: flex;
+  justify-content: center;
+  align-items: stretch;   /* makes children same height */
+  flex-wrap: wrap;
+  padding: 0 16px;
+  margin-bottom: 28px;
+}
+
+.feature-card {
+  background: #fff;
+  border-radius:10px;
+  padding: 10px;
+  text-align:center;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.06);
+  border: 1px solid #e9eef3;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between; /* push button to bottom */
+  height: 100%;
+  min-height: 180px;
+  box-sizing: border-box;
+  transition: transform 0.3s ease;
+}
+.feature-card h3 { margin:8px 0 6px; font-size:18px; color:#0b2a44; }
+.feature-card p { margin:0; color:#566973; font-size:14px; }
+
+.feature-card:hover,
+.role-card:hover,
+.social-links img:hover{
+  transform: scale(1.1); /* grow on hover */
+  cursor: pointer; 
+}
+/* Role cards: smaller, stacked */
+.role-card {
+  background:#fff;
+  border-radius:12px;
+  padding:16px;
+  text-align:center;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+  border:1px solid #e9eef3;
+  display: flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:center;
+  transition: transform 0.3s ease;
+}
+.role-card h2 { margin:6px 0; font-size:20px; color:#0b2a44; }
+.role-card p { margin:0; color:#566973; font-size:14px; }
+
+/* Icons: 24px */
+.big-icon,
+.feature-card img,
+.role-card img,
+footer .social-links img {
+  width:32px !important;
+  height:32px !important;
+  display:block;
+  object-fit:contain;
+  margin: 0 auto 12px;
+  filter: none;
+}
+
+/* Buttons: simple */
+.btn, .btn-1{
+  display:inline-block;
+  padding:10px 14px;
+  border-radius:24px;
+  border:none;
+  background:black; /* simple blue */
+  color:#fff;
+  font-weight:600;
+  cursor:pointer;
+  text-decoration: none;
+}
+
+/* Social icons in footer */
+footer {
+  margin-top: 32px;
+  padding: 14px 0;
+  text-align: center;
+  background: #f4f7fb;   /* SAME as body background */
+  border-top: none;      /* removes box line */
+  color: #566973;        /* text color */
+}
+footer .social-links ul {
+  list-style:none;
+  padding:0;
+  margin:0 0 10px;
+  display:flex;
+  gap:14px;
+  justify-content:center;
+  align-items:center;
+}
+.social-links img{
+    transition: transform 0.3s ease;
+}
+
+/* Small responsive adjustments */
+@media (max-width: 780px) {
+  h1 { font-size: 28px; margin-top: 12px; }
+  .col-1, .col-2 { width:100%; }
+  main { padding-top:72px; }
+  header h2 { font-size:18px; }
+}
+a{
+    text-decoration: none;
+}
