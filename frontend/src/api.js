@@ -2,7 +2,7 @@
 import axios from 'axios';
 
 // ✅ Backend API URL
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const API_URL = 'https://classvibe-backend.onrender.com';
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
