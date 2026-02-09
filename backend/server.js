@@ -52,10 +52,7 @@ app.get("/health", (req, res) => {
 // MIDDLEWARE
 // ============================================
 
-app.use(cors({
-  origin: 'https://classvibe.vercel.app', // Your Vercel URL
-  credentials: true
-}));
+app.use
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
