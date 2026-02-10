@@ -41,8 +41,8 @@ const io = new Server(server, {
   transports: ["websocket", "polling"]
 });
 
-app.set('io', io);   // ✅ expose io to app (future-proof)
-global.io = io;      // ✅ optional but useful
+app.set('io', io);
+global.io = io;
 
 app.get("/health", (req, res) => {
   res.status(200).send("OK");
@@ -52,11 +52,28 @@ app.get("/health", (req, res) => {
 // MIDDLEWARE
 // ============================================
 
-app.use
+// ✅ CORS Configuration - THIS WAS MISSING!
+app.use(cors({
+  origin: function(origin, callback) {
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) === -1) {
+      const msg = 'CORS policy: Origin not allowed';
+      return callback(new Error(msg), false);
+    }
+    return callback(null, true);
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.options('*', cors());
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// ... rest of your code continues here
 // ============================================
 // FILE UPLOAD SETUP (Multer)
 // ============================================
