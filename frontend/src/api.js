@@ -8,8 +8,10 @@ const api = axios.create({
   baseURL: `${API_URL}/api`,
   headers: {
     'Content-Type': 'application/json'
-  }
+  },
+  withCredentials: true // ✅ REQUIRED for CORS + auth
 });
+
 
 // Add token to every request
 api.interceptors.request.use(

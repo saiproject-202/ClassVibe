@@ -305,8 +305,7 @@ const ChatArea = ({
     if (message.messageType !== 'file' || !message.fileUrl) return null;
     const fileType = message.fileType || '';
     const fileUrl = message.fileUrl.startsWith('http') 
-      ? message.fileUrl 
-      : `${process.env.REACT_APP_API_URL || 'http://localhost:5000'}${message.fileUrl}`;
+      ? message.fileUrl:`https://classvibe-backend.onrender.com${message.fileUrl}`;
 
     // Image
     if (fileType.startsWith('image/')) {

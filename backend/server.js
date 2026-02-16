@@ -29,7 +29,7 @@ const server = http.createServer(app);
 const allowedOrigins = [
   process.env.FRONTEND_URL,
   "http://localhost:3000",
-  "http://192.168.1.112:3000"
+  "http://192.168.1.133:3000"
 ].filter(Boolean);
 
 const io = new Server(server, {
@@ -1000,6 +1000,6 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌐 Local: http://localhost:${PORT}`);
-  console.log(`🌐 Network: http://192.168.1.141:${PORT}`);
+  console.log(`🌐 Network: http://192.168.1.133:${PORT}`);
   console.log(`📁 Uploads: ${uploadsDir}`);
 });
