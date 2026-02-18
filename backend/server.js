@@ -242,7 +242,9 @@ app.post('/api/auth/register', async (req, res) => {
     
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ error: 'Server error during registration' });
+    res.status(500).json({ 
+      message: "Database connection failed",
+      error: 'Server error during registration' });
   }
 });
 
@@ -995,11 +997,14 @@ io.on('connection', (socket) => {
 // START SERVER
 // ============================================
 
-const PORT = process.env.PORT || 5000;
-
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Local: http://localhost:${PORT}`);
-  console.log(`🌐 Network: http://192.168.1.133:${PORT}`);
-  console.log(`📁 Uploads: ${uploadsDir}`);
-});
+mongoose.connect(process.env.MONGODB_URI)
+  .then(() => {
+    console.log("✅ MongoDB Connected");
+    server.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+  })
+  .catch(err => {
+    console.error("❌ MongoDB connection failed", err);
+    process.exit(1);
+  });
