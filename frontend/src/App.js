@@ -19,6 +19,7 @@ import './App.css';
 import QuizHost from './components/QuizHost';          // ⭐ ADD
 import QuizWaitingRoom from './components/QuizWaitingRoom';  // ⭐ ADD
 import QuizPlayer from './components/QuizPlayer';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -492,7 +493,7 @@ function App() {
           onClose={() => setShowAnalytics(false)}
         />
       )}
-      {/* ⭐ NEW - Schedule Modal */}
+      {/* ��� NEW - Schedule Modal */}
       {showSchedule && (
         <ScheduleSession
           onClose={() => setShowSchedule(false)}
@@ -798,6 +799,7 @@ function App() {
           </>
         )}
       </div>
+      <SpeedInsights />
     </div>
   );
 }
