@@ -18,6 +18,11 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [answeredCount, setAnsweredCount] = useState(0);
+  // ✅ NEW: teacher now sees the same leaderboard students see — was never wired up before.
+  // leaderboard = the latest list from the server; showLeaderboardFlash = whether the brief
+  // "who's leading" panel is currently visible (auto-hides when the next question starts).
+  const [leaderboard, setLeaderboard] = useState([]);
+  const [showLeaderboardFlash, setShowLeaderboardFlash] = useState(false);
 
   // ========================================
   // SOCKET EVENT LISTENERS
@@ -68,19 +73,32 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
       setAnsweredCount(0);
     });
 
-    // Listen for next question — UNCHANGED
+    // Listen for next question — UNCHANGED, plus hide the leaderboard flash so it doesn't
+    // linger on top of the new question
     socket.on('quiz:nextQuestion', (data) => {
       console.log('➡️ Next question');
       setCurrentQuestionIndex(data.questionIndex);
       setTimeRemaining(data.question.timeLimit || 45);
       setAnsweredCount(0);
       setStudents(prev => prev.map(s => ({ ...s, answered: false })));
+      setShowLeaderboardFlash(false);
+    });
+
+    // ✅ NEW: teacher now receives the same 'leaderboard:show' event students already get
+    // after every question (previously not listened for at all — teacher never saw it)
+    socket.on('leaderboard:show', (data) => {
+      console.log('🏆 Leaderboard (teacher view)');
+      setLeaderboard(data.leaderboard || []);
+      setShowLeaderboardFlash(true);
     });
 
     // ✅ CHANGED: also handle 'quiz:finished' (sent by auto-complete) AND 'quiz:ended' (teacher end)
     // Backend teacher:endQuiz now emits 'quiz:finished' — this handles both paths
+    // ✅ NEW: also capture the final leaderboard payload — previously discarded entirely
     socket.on('quiz:finished', (data) => {
       console.log('🏁 Quiz finished');
+      if (data?.leaderboard) setLeaderboard(data.leaderboard);
+      setShowLeaderboardFlash(false);
       setCurrentView('finished');
     });
 
@@ -95,6 +113,7 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
       socket.off('timer:update');
       socket.off('quiz:started');
       socket.off('quiz:nextQuestion');
+      socket.off('leaderboard:show');
       socket.off('quiz:finished');
       socket.off('error');
     };
@@ -125,6 +144,13 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
   // ✅ NEW: "Create Again Quiz" — calls onCreateAgain prop if provided by App.js
   const handleCreateAgain = () => {
     onCreateAgain ? onCreateAgain() : onClose();
+  };
+
+  // ✅ NEW: leaderboard entries only carry a userId — look up the real name we already
+  // tracked from 'student:joined' so both the flash panel and the final leaderboard can show it
+  const getStudentName = (userId) => {
+    const match = students.find(s => String(s.userId) === String(userId));
+    return match?.name || 'Student';
   };
 
   // ========================================
@@ -226,6 +252,26 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
     return (
       <div style={styles.overlay}>
         <div style={styles.modalActive}>
+          {/* ✅ NEW: brief "who's leading" panel — mirrors what students see after each question.
+              Appears when the server sends leaderboard:show, disappears when the next question starts. */}
+          {showLeaderboardFlash && (
+            <div style={styles.leaderboardFlash}>
+              <div style={styles.leaderboardFlashHeader}>🏆 Leaderboard</div>
+              <div style={styles.leaderboardFlashList}>
+                {leaderboard.slice(0, 5).map((entry) => (
+                  <div key={entry.userId} style={styles.leaderboardFlashItem}>
+                    <span style={styles.leaderboardFlashRank}>#{entry.rank}</span>
+                    <span style={styles.leaderboardFlashName}>{getStudentName(entry.userId)}</span>
+                    <span style={styles.leaderboardFlashScore}>{entry.score} pts</span>
+                  </div>
+                ))}
+                {leaderboard.length === 0 && (
+                  <div style={styles.leaderboardFlashEmpty}>No answers yet</div>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Header */}
           <div style={styles.headerActive}>
             <div>
@@ -391,6 +437,28 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
             <p style={styles.finishedText}>
               Results have been saved to history automatically.
             </p>
+
+            {/* ✅ NEW: final class leaderboard — was completely missing before, teacher saw
+                no results at all when a quiz ended. A fancier podium/1st-2nd-3rd visual is a
+                future polish pass; this is the working data version. */}
+            {leaderboard.length > 0 && (
+              <div style={styles.finalLeaderboardSection}>
+                <h3 style={styles.finalLeaderboardTitle}>🏆 Final Leaderboard</h3>
+                <div style={styles.finalLeaderboardList}>
+                  {leaderboard.map((entry) => (
+                    <div key={entry.userId} style={styles.finalLeaderboardItem}>
+                      <span style={styles.finalLeaderboardRank}>#{entry.rank}</span>
+                      <span style={styles.finalLeaderboardName}>{getStudentName(entry.userId)}</span>
+                      <span style={styles.finalLeaderboardScore}>{entry.score} pts</span>
+                      <span style={styles.finalLeaderboardMeta}>
+                        {entry.correctAnswers}/{entry.totalAnswers} correct
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div style={styles.finishedActions}>
               {/* ✅ NEW: "Create Again Quiz" — helps teacher re-run quiz for better learning */}
               <button onClick={handleCreateAgain} style={styles.createAgainBtn}>
@@ -427,8 +495,28 @@ const styles = {
   modalActive: {
     backgroundColor: 'white', borderRadius: '16px', width: '100%', maxWidth: '1200px',
     maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden',
-    boxShadow: '0 20px 60px rgba(0,0,0,0.3)'
+    boxShadow: '0 20px 60px rgba(0,0,0,0.3)', position: 'relative'
   },
+
+  // ✅ NEW: per-question leaderboard flash (teacher view)
+  leaderboardFlash: {
+    position: 'absolute', top: '90px', right: '25px', width: '260px', zIndex: 10,
+    backgroundColor: 'white', borderRadius: '12px', border: '2px solid #4F46E5',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.18)', overflow: 'hidden'
+  },
+  leaderboardFlashHeader: {
+    padding: '10px 16px', backgroundColor: '#4F46E5', color: 'white',
+    fontSize: '14px', fontWeight: '700'
+  },
+  leaderboardFlashList: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' },
+  leaderboardFlashItem: {
+    display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px',
+    borderRadius: '8px', backgroundColor: '#F9FAFB', fontSize: '13px'
+  },
+  leaderboardFlashRank: { fontWeight: '700', color: '#4F46E5', minWidth: '22px' },
+  leaderboardFlashName: { flex: 1, fontWeight: '600', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  leaderboardFlashScore: { fontWeight: '700', color: '#10B981' },
+  leaderboardFlashEmpty: { padding: '12px', fontSize: '13px', color: '#9CA3AF', textAlign: 'center' },
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
     padding: '25px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: '#4F46E5'
@@ -520,6 +608,19 @@ const styles = {
   finishedIcon: { fontSize: '80px', marginBottom: '20px' },
   finishedTitle: { fontSize: '32px', fontWeight: '700', color: '#1F2937', marginBottom: '15px' },
   finishedText: { fontSize: '16px', color: '#6B7280', marginBottom: '30px' },
+
+  // ✅ NEW: final leaderboard (teacher view)
+  finalLeaderboardSection: { textAlign: 'left', marginBottom: '30px', maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto' },
+  finalLeaderboardTitle: { fontSize: '18px', fontWeight: '700', color: '#1F2937', marginBottom: '12px', textAlign: 'center' },
+  finalLeaderboardList: { display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '280px', overflowY: 'auto' },
+  finalLeaderboardItem: {
+    display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
+    backgroundColor: '#F9FAFB', borderRadius: '10px', border: '1px solid #E5E7EB'
+  },
+  finalLeaderboardRank: { fontWeight: '700', color: '#4F46E5', minWidth: '30px' },
+  finalLeaderboardName: { flex: 1, fontWeight: '600', color: '#374151', textAlign: 'left' },
+  finalLeaderboardScore: { fontWeight: '700', color: '#10B981' },
+  finalLeaderboardMeta: { fontSize: '12px', color: '#6B7280', minWidth: '90px', textAlign: 'right' },
   // ✅ NEW: two-button layout in finished view
   finishedActions: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' },
   createAgainBtn: {

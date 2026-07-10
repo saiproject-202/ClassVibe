@@ -11,6 +11,8 @@
 
 const QuizSession = require('../models/QuizSession');
 const Quiz        = require('../models/Quiz');
+const QuizResult  = require('../models/QuizResult');
+const Analytics   = require('../models/Analytics');
 const Message     = require('../models/Message');
 const User        = require('../models/User');
 
@@ -177,6 +179,9 @@ function setupQuizSocketHandlers(io, socket) {
 
       console.log('🏁 Quiz ended by teacher:', sessionId);
 
+      // ✅ NEW: persist QuizResult/Analytics — runs after quiz:finished so it never delays students
+      await finalizeQuizSession(session, leaderboard);
+
     } catch (error) {
       console.error('❌ End quiz error:', error);
     }
@@ -332,6 +337,12 @@ function setupQuizSocketHandlers(io, socket) {
         const studentAnswer = String(selectedAnswer ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
         const correctAnswer = String(question.correctAnswer ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
         isCorrect = studentAnswer === correctAnswer;
+      } else if (question.questionType === 'multiple_select') {
+        // ✅ FIXED: array === array is always false (reference comparison), so
+        // multiple_select questions could never be marked correct. Compare as sets instead.
+        const selected = Array.isArray(selectedAnswer) ? [...selectedAnswer].map(Number).sort((a, b) => a - b) : [];
+        const correct  = Array.isArray(question.correctAnswer) ? [...question.correctAnswer].map(Number).sort((a, b) => a - b) : [];
+        isCorrect = selected.length === correct.length && selected.every((v, i) => v === correct[i]);
       } else {
         isCorrect = selectedAnswer === question.correctAnswer;
       }
@@ -560,6 +571,9 @@ async function handleQuestionComplete(io, session, questionIndex) {
             message:     'Quiz completed!'
           });
           console.log('🏁 Quiz finished (auto)');
+
+          // ✅ NEW: persist QuizResult/Analytics — runs after quiz:finished so it never delays students
+          await finalizeQuizSession(updatedSession, finalLeaderboard);
         }, 5000);
       }
     }, 10000);
@@ -583,6 +597,119 @@ function getLeaderboard(session) {
     }))
     .sort((a, b) => b.score !== a.score ? b.score - a.score : b.correctAnswers - a.correctAnswers)
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
+}
+
+/**
+ * ✅ NEW: Finalize a completed quiz session.
+ *
+ * Persists one QuizResult document per participant (this collection previously
+ * had zero documents ever written to it — quiz history was read directly off
+ * the live QuizSession instead, so per-student badges/percentiles/history were
+ * always empty), updates the Quiz template's running average score, and feeds
+ * the Analytics model so the teacher dashboard reflects real activity instead
+ * of permanently-zero counters.
+ *
+ * Called once from BOTH completion paths (teacher:endQuiz and the auto-complete
+ * branch of handleQuestionComplete) via this single shared function, specifically
+ * so the two paths can't drift out of sync with each other over time.
+ *
+ * Deliberately non-fatal: this always runs AFTER the 'quiz:finished' event has
+ * already been broadcast to students, so a failure here never delays or blocks
+ * what students see.
+ */
+async function finalizeQuizSession(session, leaderboard) {
+  try {
+    const quiz = session.quiz;
+    if (!quiz || !quiz.questions || quiz.questions.length === 0) return;
+
+    const participantsWithAnswers = session.participants.filter(p => p.answers && p.answers.length > 0);
+    if (participantsWithAnswers.length === 0) {
+      console.log('ℹ️ finalizeQuizSession: no participants with answers, skipping QuizResult creation');
+      return;
+    }
+
+    const maxScore = quiz.getTotalPoints();
+    const totalQuestions = quiz.questions.length;
+    const rankByUserId = new Map(
+      (leaderboard || []).map(entry => [entry.userId.toString(), entry.rank])
+    );
+
+    let sessionScoreSum = 0;
+    let resultsCreated = 0;
+
+    for (const participant of participantsWithAnswers) {
+      try {
+        const correctAnswers = participant.answers.filter(a => a.isCorrect).length;
+
+        const answers = participant.answers.map(a => {
+          const q = quiz.questions[a.questionIndex];
+          return {
+            questionIndex: a.questionIndex,
+            questionText: q ? q.questionText : '',
+            selectedAnswer: a.selectedAnswer,
+            correctAnswer: q ? q.correctAnswer : null,
+            isCorrect: a.isCorrect,
+            points: a.points,
+            timeTaken: a.timeTaken,
+            answeredAt: a.answeredAt
+          };
+        });
+
+        const result = new QuizResult({
+          quiz: quiz._id,
+          session: session._id,
+          student: participant.user,
+          group: session.group,
+          score: participant.score,
+          maxScore,
+          percentage: 0, // computed by calculateMetrics() below
+          correctAnswers,
+          totalQuestions,
+          answers,
+          startedAt: participant.joinedAt || session.createdAt || new Date(),
+          completedAt: new Date(),
+          rank: rankByUserId.get(participant.user.toString()) || null
+        });
+
+        result.calculateMetrics();
+        result.assignBadge(participantsWithAnswers.length);
+        await result.save();
+        resultsCreated++;
+
+        sessionScoreSum += participant.score;
+
+        // Feed Analytics — this is what makes the teacher dashboard reflect
+        // real quiz activity instead of always showing "Needs Attention".
+        try {
+          const analytics = await Analytics.getOrCreate(participant.user, session.group);
+          analytics.recordQuizResult({
+            score: result.score,
+            correctAnswers: result.correctAnswers,
+            totalQuestions: result.totalQuestions,
+            badge: result.badge,
+            averageTimePerQuestion: result.averageTimePerQuestion
+          });
+          await analytics.save();
+        } catch (analyticsError) {
+          console.error('⚠️ Analytics.recordQuizResult failed (non-fatal):', analyticsError.message);
+        }
+      } catch (participantError) {
+        console.error('⚠️ QuizResult creation failed for one participant (non-fatal):', participantError.message);
+      }
+    }
+
+    // One session-level average-score update for the Quiz template
+    try {
+      const sessionAverageScore = sessionScoreSum / participantsWithAnswers.length;
+      await quiz.updateAverageScore(sessionAverageScore);
+    } catch (quizUpdateError) {
+      console.error('⚠️ Quiz.updateAverageScore failed (non-fatal):', quizUpdateError.message);
+    }
+
+    console.log(`✅ finalizeQuizSession: created ${resultsCreated}/${participantsWithAnswers.length} QuizResult docs for session ${session._id}`);
+  } catch (error) {
+    console.error('❌ finalizeQuizSession error (non-fatal — quiz:finished was already broadcast):', error);
+  }
 }
 
 /**

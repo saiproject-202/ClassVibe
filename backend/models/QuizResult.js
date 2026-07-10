@@ -10,7 +10,7 @@ const quizResultSchema = new mongoose.Schema({
     ref: 'Quiz',
     required: true
   },
-  
+
   // Reference to quiz session
   session: {
     type: mongoose.Schema.Types.ObjectId,
@@ -203,7 +203,7 @@ quizResultSchema.statics.getGroupPerformance = async function(groupId) {
 // Get leaderboard across all quizzes
 quizResultSchema.statics.getGlobalLeaderboard = async function(groupId, limit = 10) {
   const results = await this.aggregate([
-    { $match: { group: mongoose.Types.ObjectId(groupId) } },
+    { $match: { group: new mongoose.Types.ObjectId(groupId) } },
     {
       $group: {
         _id: '$student',
