@@ -1,17 +1,10 @@
 // frontend/src/components/FloatingQuizButton.jsx
 // Draggable floating quiz button
-// Teacher: quiz active -> opens QuizHost (live control); no active quiz -> opens QuizHistoryPanel
-//          (past quizzes for this classroom, with a "+ New Quiz" button to build one)
+// Teacher: opens QuizControlPanel (create / control)
 // Student: joins active quiz (waiting room / player)
-//
-// ✅ CHANGED: previously opened QuizControlPanel, whose Start/Next/End buttons called
-// REST endpoints that don't exist on the backend (always failed) and which showed two
-// buttons ("End Quiz" + "Finish Quiz") doing the exact same thing on the last question.
-// Now always routes to the screen that actually works.
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import QuizHost from './QuizHost';
-import QuizHistoryPanel from './QuizHistoryPanel';
+import QuizControlPanel from './QuizControlPanel';
 
 const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
 
@@ -26,13 +19,8 @@ const FloatingQuizButton = ({
   const [quizSession, setQuizSession] = useState(null);
   const [pulse, setPulse] = useState(false);
 
-  // ── Teacher panels ────────────────────────────────────────────────
-  // hostSession holds a freshly-fetched, fully-populated session (with quiz.questions)
-  // right before opening QuizHost — quizSession above can come from a socket event with
-  // a different, partial shape, so we don't trust it directly for rendering QuizHost.
-  const [hostSession, setHostSession] = useState(null);
-  const [showHostControls, setShowHostControls] = useState(false);
-  const [showHistory, setShowHistory] = useState(false);
+  // ── Control-panel visibility (teacher) ───────────────────────────
+  const [showControlPanel, setShowControlPanel] = useState(false);
 
   // ── Draggable state ───────────────────────────────────────────────
   // Start position: bottom-right corner
@@ -93,8 +81,7 @@ const FloatingQuizButton = ({
 
     const onQuizEnded = () => {
       setQuizSession(null);
-      setShowHostControls(false);
-      setHostSession(null);
+      setShowControlPanel(false);
     };
 
     const onParticipantJoined = (data) => {
@@ -195,43 +182,18 @@ const FloatingQuizButton = ({
     if (onJoinQuiz) onJoinQuiz(sessionId);
   }, [socket, onJoinQuiz]);
 
-  // ✅ NEW: Teacher click handler — opens QuizHost (live control) if a quiz is
-  // active/waiting right now, otherwise opens the quiz history panel (which also
-  // offers a "+ New Quiz" button, so nothing is lost from the old "no active quiz"
-  // screen it replaces).
-  const openTeacherPanel = useCallback(async () => {
-    if (!quizSession) {
-      setShowHistory(true);
-      return;
-    }
-
-    // Fetch a fresh, fully-populated session right before opening QuizHost — quizSession
-    // in state may have come from a socket event with a different, partial shape.
-    const token = localStorage.getItem('token');
-    try {
-      const res = await fetch(`${API}/api/quiz/group/${groupId}/active`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (data.session && data.session.quiz) {
-        setHostSession(data.session);
-        setShowHostControls(true);
-        return;
-      }
-    } catch (err) {
-      console.warn('FloatingQuizButton: could not load active session', err.message);
-    }
-    // No valid active session after all (e.g. it just ended) — fall back to history
-    setShowHistory(true);
-  }, [quizSession, groupId]);
-
   // ── Click handler ─────────────────────────────────────────────────
   const handleClick = () => {
     // If the user dragged (not a click), ignore
     if (moved.current) return;
 
     if (isTeacher) {
-      openTeacherPanel();
+      // Teacher: open control panel if quiz exists, else open quiz builder
+      if (quizSession) {
+        setShowControlPanel(true);
+      } else {
+        onCreateQuiz?.(null);
+      }
     } else {
       // Student
       if (quizSession) {
@@ -291,7 +253,7 @@ const FloatingQuizButton = ({
         onTouchMove={onTouchMove}
         onTouchEnd={onTouchEnd}
         onClick={handleClick}
-        title={isTeacher ? (quizSession ? 'Open Live Quiz Control' : 'View Quiz History / Create New Quiz') : (quizSession ? 'Join Quiz' : 'No quiz active')}
+        title={isTeacher ? (quizSession ? 'Open Quiz Control Panel' : 'Create New Quiz') : (quizSession ? 'Join Quiz' : 'No quiz active')}
         style={{
           position: 'fixed',
           left: pos.x,
@@ -358,31 +320,13 @@ const FloatingQuizButton = ({
         )}
       </div>
 
-      {/* ── Teacher: live quiz control (the working screen) ────────── */}
-      {isTeacher && showHostControls && hostSession && (
-        <QuizHost
-          quiz={hostSession.quiz}
-          sessionId={hostSession._id}
-          onClose={() => {
-            setShowHostControls(false);
-            setHostSession(null);
-            checkActiveQuiz(); // refresh the floating button's own state (quiz may have ended)
-          }}
-          onCreateAgain={() => {
-            setShowHostControls(false);
-            setHostSession(null);
-            onCreateQuiz?.(null);
-          }}
-        />
-      )}
-
-      {/* ── Teacher: quiz history (shown when no quiz is currently active) ── */}
-      {isTeacher && showHistory && (
-        <QuizHistoryPanel
+      {/* ── Teacher: Quiz Control Panel ──────────────────────────── */}
+      {isTeacher && showControlPanel && (
+        <QuizControlPanel
           groupId={groupId}
-          onClose={() => setShowHistory(false)}
+          onClose={() => setShowControlPanel(false)}
           onStartQuiz={() => {
-            setShowHistory(false);
+            setShowControlPanel(false);
             onCreateQuiz?.(null);
           }}
         />
