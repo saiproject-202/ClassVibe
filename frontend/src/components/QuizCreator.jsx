@@ -31,13 +31,107 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
   const timerInterval = useRef(null);
   
   // Step 3: Settings
+  // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §12): quizMode + teamMode nested here so the
+  // existing handleSaveChanges() (which already sends the whole `settings` object as-is)
+  // needs no changes at all to start saving team config too.
   const [settings, setSettings] = useState({
     showCorrectAnswer: true,
     showLeaderboard: true,
     allowLateJoin: true,
     shuffleQuestions: false,
-    shuffleOptions: true
+    shuffleOptions: true,
+    // 'individual' | 'team_battle' (teacher types names — also covers what
+    // TEAM_MODE_DESIGN.md calls "Custom Teams", same mechanism, one UI path) |
+    // 'random_teams' | 'school_house' (Phase 4)
+    quizMode: 'individual',
+    teamMode: {
+      teamCount: 2,
+      teams: [
+        { name: '', color: '#4F46E5', icon: '🚀' },
+        { name: '', color: '#EF4444', icon: '☄️' }
+      ],
+      allowStudentChoice: true,
+      autoBalance: true,
+      lockOnStart: true
+    }
   });
+
+  // ✅ NEW (Phase 3): preset color swatches offered per team row — keeps the UI to a
+  // one-click choice instead of a full color picker, matching the "under one minute to
+  // configure" design requirement (§12.4)
+  const TEAM_COLOR_PRESETS = ['#4F46E5', '#EF4444', '#10B981', '#F59E0B'];
+
+  // ✅ NEW (Phase 4): School House Mode's default preset — teacher can still rename/
+  // recolor every field, this just saves them from starting on a blank form
+  const SCHOOL_HOUSE_PRESETS = [
+    { name: 'Red House',    color: '#EF4444', icon: '🔴' },
+    { name: 'Blue House',   color: '#3B82F6', icon: '🔵' },
+    { name: 'Green House',  color: '#10B981', icon: '🟢' },
+    { name: 'Yellow House', color: '#F59E0B', icon: '🟡' }
+  ];
+
+  // Resizes settings.teamMode.teams to match a new team count (2-4), keeping any
+  // already-filled rows intact rather than resetting everything. New rows are seeded
+  // differently depending on the active mode (blank / auto-numbered / house preset).
+  const handleTeamCountChange = (count) => {
+    setSettings(prev => {
+      const teams = [...prev.teamMode.teams];
+      while (teams.length < count) {
+        const i = teams.length;
+        if (prev.quizMode === 'random_teams') {
+          teams.push({ name: `Team ${i + 1}`, color: TEAM_COLOR_PRESETS[i % TEAM_COLOR_PRESETS.length], icon: '' });
+        } else if (prev.quizMode === 'school_house' && SCHOOL_HOUSE_PRESETS[i]) {
+          teams.push({ ...SCHOOL_HOUSE_PRESETS[i] });
+        } else {
+          teams.push({ name: '', color: TEAM_COLOR_PRESETS[i % TEAM_COLOR_PRESETS.length], icon: '' });
+        }
+      }
+      teams.length = count; // trim if reduced
+      return { ...prev, teamMode: { ...prev.teamMode, teamCount: count, teams } };
+    });
+  };
+
+  const handleTeamFieldChange = (index, field, value) => {
+    setSettings(prev => {
+      const teams = [...prev.teamMode.teams];
+      teams[index] = { ...teams[index], [field]: value };
+      return { ...prev, teamMode: { ...prev.teamMode, teams } };
+    });
+  };
+
+  // ✅ NEW (Phase 4 — TEAM_MODE_DESIGN.md §2 implementation note: "School House and
+  // Custom Teams are the same underlying mechanism" — Random Teams reuses it too, just
+  // with auto-generated names and no student choice). Applies the right defaults for
+  // whichever mode the teacher just switched to.
+  const handleQuizModeChange = (mode) => {
+    setSettings(prev => {
+      const count = prev.teamMode.teamCount || 2;
+      let teams = prev.teamMode.teams;
+      let allowStudentChoice = prev.teamMode.allowStudentChoice;
+
+      if (mode === 'random_teams') {
+        teams = Array.from({ length: 4 }, (_, i) => ({
+          name: `Team ${i + 1}`,
+          color: TEAM_COLOR_PRESETS[i % TEAM_COLOR_PRESETS.length],
+          icon: ''
+        }));
+        allowStudentChoice = false; // the system distributes everyone automatically
+      } else if (mode === 'school_house') {
+        teams = SCHOOL_HOUSE_PRESETS.map(h => ({ ...h }));
+        allowStudentChoice = true;
+      } else if (mode === 'team_battle' && (prev.quizMode === 'random_teams' || prev.quizMode === 'school_house')) {
+        // Coming from an auto-populated mode — reset to blank rows for manual entry.
+        // (Switching between team_battle <-> team_battle, or arriving fresh, keeps
+        // whatever the teacher already typed.)
+        teams = Array.from({ length: count }, (_, i) => ({
+          name: '', color: TEAM_COLOR_PRESETS[i % TEAM_COLOR_PRESETS.length], icon: ''
+        }));
+        allowStudentChoice = true;
+      }
+
+      return { ...prev, quizMode: mode, teamMode: { ...prev.teamMode, teamCount: count, teams, allowStudentChoice } };
+    });
+  };
   
   // UI State
   const [loading, setLoading] = useState(false);
@@ -365,6 +459,24 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
   // ✅ FIX — after saving, also start the session
     const handleSaveChanges = async (shouldStart = false) => {
       if (!generatedQuizId) return;
+
+      // ✅ NEW (Phase 3/4): team names are required before any team-mode quiz can be
+      // saved — catch it here rather than letting a session start with blank/duplicate
+      // names. Random Teams always has auto-generated names by this point, so this
+      // check passes trivially for it, but we still run it for consistency.
+      if (settings.quizMode !== 'individual') {
+        const activeTeams = settings.teamMode.teams.slice(0, settings.teamMode.teamCount);
+        if (activeTeams.some(t => !t.name.trim())) {
+          setError('Please name every team before saving (see Quiz Mode in Settings).');
+          return;
+        }
+        const names = activeTeams.map(t => t.name.trim().toLowerCase());
+        if (new Set(names).size !== names.length) {
+          setError('Team names must be unique.');
+          return;
+        }
+      }
+
       setLoading(true);
 
       try {
@@ -980,6 +1092,137 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
           {currentStep === 'settings' && (
             <div style={styles.settingsContainer}>
               <h3 style={styles.sectionTitle}>Quiz Settings</h3>
+
+              {/* ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §12): Quiz Mode card, placed above
+                  the existing checkboxes per the progressive-disclosure layout — nothing
+                  below changes when Individual is selected (today's default, unchanged). */}
+              <div style={styles.quizModeCard}>
+                <div style={styles.quizModeTitle}>🎮 Quiz Mode</div>
+                <div style={styles.quizModeOptions}>
+                  <div
+                    onClick={() => handleQuizModeChange('individual')}
+                    style={{ ...styles.quizModeOption, ...(settings.quizMode === 'individual' ? styles.quizModeOptionActive : {}) }}
+                  >
+                    <div style={styles.quizModeOptionTitle}>👤 Individual Mode</div>
+                    <div style={styles.quizModeOptionDesc}>Every student competes independently. Best for exams and practice.</div>
+                  </div>
+                  <div
+                    onClick={() => handleQuizModeChange('team_battle')}
+                    style={{ ...styles.quizModeOption, ...(settings.quizMode === 'team_battle' ? styles.quizModeOptionActive : {}) }}
+                  >
+                    <div style={styles.quizModeOptionTitle}>⚔️ Team Battle</div>
+                    <div style={styles.quizModeOptionDesc}>You name the teams. Team leaderboard shown after every question.</div>
+                  </div>
+                  {/* ✅ NEW (Phase 4) */}
+                  <div
+                    onClick={() => handleQuizModeChange('random_teams')}
+                    style={{ ...styles.quizModeOption, ...(settings.quizMode === 'random_teams' ? styles.quizModeOptionActive : {}) }}
+                  >
+                    <div style={styles.quizModeOptionTitle}>🎲 Random Teams</div>
+                    <div style={styles.quizModeOptionDesc}>Just pick how many teams — students are distributed automatically and fairly.</div>
+                  </div>
+                  <div
+                    onClick={() => handleQuizModeChange('school_house')}
+                    style={{ ...styles.quizModeOption, ...(settings.quizMode === 'school_house' ? styles.quizModeOptionActive : {}) }}
+                  >
+                    <div style={styles.quizModeOptionTitle}>🏠 School House</div>
+                    <div style={styles.quizModeOptionDesc}>Starts with Red/Blue/Green/Yellow House — rename if your school uses different ones.</div>
+                  </div>
+                </div>
+
+                {/* Team setup — appears for any non-Individual mode */}
+                {settings.quizMode !== 'individual' && (
+                  <div style={styles.teamSetup}>
+                    <div style={styles.teamSetupRow}>
+                      <span style={styles.teamSetupLabel}>Number of teams</span>
+                      <div style={styles.teamCountButtons}>
+                        {[2, 3, 4].map(n => (
+                          <button
+                            key={n}
+                            type="button"
+                            onClick={() => handleTeamCountChange(n)}
+                            style={{ ...styles.teamCountBtn, ...(settings.teamMode.teamCount === n ? styles.teamCountBtnActive : {}) }}
+                          >
+                            {n}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* ✅ NEW (Phase 4): Random Teams needs no name/color input at all —
+                        names are auto-generated and there's nothing for the teacher to
+                        configure per-team. Team Battle and School House both show the
+                        same editable rows, just with different starting values. */}
+                    {settings.quizMode === 'random_teams' ? (
+                      <p style={styles.randomTeamsNote}>
+                        Teams will be named "Team 1", "Team 2"... and students will be spread across them evenly and automatically — nobody picks their own team in this mode.
+                      </p>
+                    ) : (
+                      <div style={styles.teamRows}>
+                        {settings.teamMode.teams.slice(0, settings.teamMode.teamCount).map((team, i) => (
+                          <div key={i} style={styles.teamRow}>
+                            <input
+                              type="text"
+                              value={team.icon}
+                              onChange={(e) => handleTeamFieldChange(i, 'icon', e.target.value)}
+                              placeholder="🚀"
+                              maxLength={2}
+                              style={styles.teamIconInput}
+                            />
+                            <input
+                              type="text"
+                              value={team.name}
+                              onChange={(e) => handleTeamFieldChange(i, 'name', e.target.value)}
+                              placeholder={`Team ${i + 1} name`}
+                              maxLength={30}
+                              style={styles.teamNameInput}
+                            />
+                            <div style={styles.teamColorSwatches}>
+                              {TEAM_COLOR_PRESETS.map(c => (
+                                <div
+                                  key={c}
+                                  onClick={() => handleTeamFieldChange(i, 'color', c)}
+                                  style={{
+                                    ...styles.teamColorSwatch,
+                                    backgroundColor: c,
+                                    ...(team.color === c ? styles.teamColorSwatchActive : {})
+                                  }}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={styles.teamTogglesList}>
+                      {[
+                        // Allow-choice toggle doesn't apply to Random Teams — that whole
+                        // mode's point is that nobody picks, so it's hidden there instead
+                        // of shown-but-forced-off (less confusing than a disabled checkbox)
+                        ...(settings.quizMode !== 'random_teams'
+                          ? [{ key: 'allowStudentChoice', label: 'Allow students to choose their own team' }]
+                          : []),
+                        { key: 'autoBalance', label: 'Keep teams balanced automatically' },
+                        { key: 'lockOnStart', label: 'Lock teams once the quiz starts' }
+                      ].map(t => (
+                        <label key={t.key} style={styles.settingLabel}>
+                          <input
+                            type="checkbox"
+                            checked={settings.teamMode[t.key]}
+                            onChange={(e) => setSettings({
+                              ...settings,
+                              teamMode: { ...settings.teamMode, [t.key]: e.target.checked }
+                            })}
+                            style={styles.settingCheckbox}
+                          />
+                          {t.label}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               <div style={styles.settingsList}>
                 {[
@@ -1756,6 +1999,58 @@ const styles = {
     cursor: 'pointer',
     accentColor: '#4F46E5'
   },
+
+  // ✅ NEW (Phase 3): Quiz Mode card + team setup
+  quizModeCard: {
+    padding: '20px',
+    backgroundColor: '#fff',
+    border: '2px solid #e5e7eb',
+    borderRadius: '12px',
+    marginBottom: '16px'
+  },
+  quizModeTitle: { fontSize: '16px', fontWeight: '700', color: '#1F2937', marginBottom: '14px' },
+  quizModeOptions: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' },
+  quizModeOption: {
+    padding: '16px', borderRadius: '10px', border: '2px solid #e5e7eb',
+    cursor: 'pointer', transition: 'all 0.15s'
+  },
+  quizModeOptionActive: { border: '2px solid #4F46E5', backgroundColor: '#EEF2FF' },
+  quizModeOptionTitle: { fontSize: '15px', fontWeight: '700', color: '#1F2937', marginBottom: '4px' },
+  quizModeOptionDesc: { fontSize: '13px', color: '#6B7280', lineHeight: '1.4' },
+
+  teamSetup: {
+    marginTop: '18px', paddingTop: '18px', borderTop: '2px solid #f0f0f0',
+    display: 'flex', flexDirection: 'column', gap: '16px'
+  },
+  teamSetupRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' },
+  teamSetupLabel: { fontSize: '14px', fontWeight: '600', color: '#374151' },
+  teamCountButtons: { display: 'flex', gap: '8px' },
+  teamCountBtn: {
+    width: '36px', height: '36px', borderRadius: '8px', border: '2px solid #e5e7eb',
+    backgroundColor: '#fff', color: '#374151', fontWeight: '700', cursor: 'pointer'
+  },
+  teamCountBtnActive: { border: '2px solid #4F46E5', backgroundColor: '#4F46E5', color: '#fff' },
+
+  teamRows: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  teamRow: { display: 'flex', alignItems: 'center', gap: '10px' },
+  teamIconInput: {
+    width: '44px', height: '40px', textAlign: 'center', fontSize: '18px',
+    border: '2px solid #e5e7eb', borderRadius: '8px'
+  },
+  teamNameInput: {
+    flex: 1, height: '40px', padding: '0 12px', fontSize: '14px',
+    border: '2px solid #e5e7eb', borderRadius: '8px'
+  },
+  teamColorSwatches: { display: 'flex', gap: '6px', flexShrink: 0 },
+  teamColorSwatch: {
+    width: '24px', height: '24px', borderRadius: '50%', cursor: 'pointer',
+    border: '2px solid transparent'
+  },
+  teamColorSwatchActive: { border: '2px solid #1F2937', boxShadow: '0 0 0 2px #fff inset' },
+
+  teamTogglesList: { display: 'flex', flexDirection: 'column', gap: '10px' },
+  // ✅ NEW (Phase 4)
+  randomTeamsNote: { fontSize: '13px', color: '#6B7280', lineHeight: '1.5', margin: 0, padding: '12px 14px', backgroundColor: '#F9FAFB', borderRadius: '8px' },
 
   // Footer
   footer: {

@@ -128,9 +128,55 @@ const quizSchema = new mongoose.Schema({
     allowLateJoin: {
       type: Boolean,
       default: true
+    },
+
+    // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §2/§9.1): Individual vs Team Battle.
+    // 'random_teams' | 'school_house' | 'custom_teams' are reserved enum values for
+    // Phase 4 — the schema supports them now so no later migration is needed, but only
+    // 'individual' and 'team_battle' have real gameplay logic behind them so far.
+    quizMode: {
+      type: String,
+      enum: ['individual', 'team_battle', 'random_teams', 'school_house', 'custom_teams'],
+      default: 'individual'
+    },
+
+    // Team setup — only meaningful when quizMode !== 'individual'
+    teamMode: {
+      teamCount: { type: Number, min: 2, max: 4 },
+      // Teacher-defined teams. teamId is derived from name (see quiz-socket-handlers.js) —
+      // no separate id scheme needed since team names are already required to be unique
+      // within a quiz.
+      teams: [{
+        name:  { type: String, trim: true },
+        color: { type: String, trim: true },
+        icon:  { type: String, trim: true }
+      }],
+      // If false, the teacher assigns teams instead of students picking their own
+      allowStudentChoice: { type: Boolean, default: true },
+      // Keeps team sizes within 1 of each other by rejecting a pick that would overload a team
+      autoBalance: { type: Boolean, default: true },
+      // Freezes team assignment the moment the teacher starts the quiz — a late joiner
+      // (only possible if settings.allowLateJoin is also true) is auto-assigned to
+      // whichever team currently has the fewest members
+      lockOnStart: { type: Boolean, default: true }
+    },
+
+    // End-of-quiz awards — individual-mode awards (fastestThinker/bestAccuracy/
+    // longestStreak/mostImproved) already compute unconditionally as of Phase 2;
+    // these flags exist for the future teacher-facing on/off toggles (Phase 3.6+),
+    // not yet read by the gameplay/finalization code — see the Phase 2 checklist note
+    // about not shipping toggles with no code path behind them; teamSpirit IS already
+    // wired up (Phase 3.5) since it only makes sense in team mode, unlike the rest.
+    awards: {
+      mvp:            { type: Boolean, default: true },
+      fastestThinker: { type: Boolean, default: true },
+      bestAccuracy:   { type: Boolean, default: true },
+      longestStreak:  { type: Boolean, default: true },
+      mostImproved:   { type: Boolean, default: false },
+      teamSpirit:     { type: Boolean, default: true }
     }
   },
-  
+
   // Quiz status
   status: {
     type: String,

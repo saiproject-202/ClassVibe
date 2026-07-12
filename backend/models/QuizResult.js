@@ -104,7 +104,16 @@ const quizResultSchema = new mongoose.Schema({
     type: String,
     enum: ['gold', 'silver', 'bronze', 'participant', null],
     default: null
-  }
+  },
+
+  // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §9.3): null in individual mode.
+  // A separate QuizTeamResult collection was considered (§9.4) and deferred — these
+  // fields are enough to reconstruct team history by grouping QuizResult rows by
+  // teamId, without the added surface area of a whole new model this round.
+  teamId:     { type: String, default: null },
+  teamRank:   { type: Number, default: null },
+  teamRating: { type: Number, default: null },
+  awardsEarned: [{ type: String }]
   
 }, {
   timestamps: true

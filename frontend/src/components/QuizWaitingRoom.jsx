@@ -1,11 +1,35 @@
 // frontend/src/components/QuizWaitingRoom.jsx
 // Student waiting lobby before quiz starts
+// ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §3/§7): "Choose your Team" selection, shown
+// only when the session is in team mode (session.teams non-empty).
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 const QuizWaitingRoom = ({ session, onClose, socket }) => {
   const [participants, setParticipants] = useState(session?.participants || []);
   const [status, setStatus] = useState(session?.status || 'waiting');
+
+  const sessionId = session?._id || session?.sessionId;
+  // Matches the same pattern used in QuizPlayer.jsx for consistency
+  const userId = useRef(JSON.parse(localStorage.getItem('user') || '{}')?.id).current;
+
+  // ✅ NEW (Phase 3): team state — teams list comes from the session itself (snapshotted
+  // server-side at session creation, see routes/quiz.js), roster counts + my own pick
+  // update live as students join teams
+  const [teams] = useState(session?.teams || []);
+  const [teamRosterCounts, setTeamRosterCounts] = useState({});
+  const [myTeamId, setMyTeamId] = useState(() => {
+    const me = (session?.participants || []).find(p => String(p.user) === String(userId));
+    return me?.teamId || null;
+  });
+  const [teamFullMessage, setTeamFullMessage] = useState('');
+  const allowStudentChoice = session?.sessionSettings?.allowStudentChoice !== false;
+
+  const handleSelectTeam = (teamId) => {
+    if (!socket || !sessionId || !allowStudentChoice) return;
+    setTeamFullMessage('');
+    socket.emit('student:selectTeam', { sessionId, teamId });
+  };
 
   useEffect(() => {
     if (!socket) return;
@@ -17,6 +41,19 @@ const QuizWaitingRoom = ({ session, onClose, socket }) => {
         if (prev.find(p => p.userId === data.userId)) return prev;
         return [...prev, data];
       });
+    });
+
+    // ✅ NEW (Phase 3): team roster updates — fires for every pick (including the
+    // teacher's lock-in auto-assignment at quiz start, which sends userId: null)
+    socket.on('team:assigned', (data) => {
+      setTeamRosterCounts(data.teamRosterCounts || {});
+      if (data.userId && String(data.userId) === String(userId)) {
+        setMyTeamId(data.teamId);
+      }
+    });
+
+    socket.on('team:full', (data) => {
+      setTeamFullMessage(`That team is full right now — try another.`);
     });
 
     // Listen for quiz starting
@@ -31,9 +68,11 @@ const QuizWaitingRoom = ({ session, onClose, socket }) => {
 
     return () => {
       socket.off('student:joined');
+      socket.off('team:assigned');
+      socket.off('team:full');
       socket.off('quiz:started');
     };
-  }, [socket]);
+  }, [socket, userId]);
 
   return (
     <div style={styles.overlay}>
@@ -66,6 +105,42 @@ const QuizWaitingRoom = ({ session, onClose, socket }) => {
             </>
           )}
         </div>
+
+        {/* ✅ NEW (Phase 3): Choose your Team — only rendered in team mode */}
+        {teams.length > 0 && (
+          <div style={styles.teamSection}>
+            <h4 style={styles.sectionTitle}>
+              {allowStudentChoice ? '🏆 Choose your Team' : '🏆 Your Team'}
+            </h4>
+            {!allowStudentChoice && !myTeamId && (
+              <p style={styles.emptyText}>Your teacher will assign your team when the quiz starts.</p>
+            )}
+            <div style={styles.teamGrid}>
+              {teams.map(team => {
+                const count = teamRosterCounts[team.teamId] ?? 0;
+                const isMine = myTeamId === team.teamId;
+                return (
+                  <div
+                    key={team.teamId}
+                    onClick={() => allowStudentChoice && handleSelectTeam(team.teamId)}
+                    style={{
+                      ...styles.teamCard,
+                      borderColor: isMine ? (team.color || '#4F46E5') : '#e0e0e0',
+                      backgroundColor: isMine ? `${team.color || '#4F46E5'}1A` : '#fff',
+                      cursor: allowStudentChoice ? 'pointer' : 'default'
+                    }}
+                  >
+                    <div style={styles.teamCardIcon}>{team.icon || '🏳️'}</div>
+                    <div style={styles.teamCardName}>{team.name}</div>
+                    <div style={styles.teamCardCount}>{count} joined</div>
+                    {isMine && <div style={{ ...styles.teamCardBadge, backgroundColor: team.color || '#4F46E5' }}>You're here</div>}
+                  </div>
+                );
+              })}
+            </div>
+            {teamFullMessage && <p style={styles.teamFullMsg}>{teamFullMessage}</p>}
+          </div>
+        )}
 
         {/* Participants List */}
         <div style={styles.participantsSection}>
@@ -190,6 +265,32 @@ const styles = {
     padding: '20px',
     borderBottom: '1px solid #e0e0e0'
   },
+  // ✅ NEW (Phase 3): team selection
+  teamSection: {
+    padding: '20px',
+    borderBottom: '1px solid #e0e0e0'
+  },
+  teamGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+    gap: '12px'
+  },
+  teamCard: {
+    padding: '14px',
+    borderRadius: '12px',
+    border: '2px solid #e0e0e0',
+    textAlign: 'center',
+    transition: 'all 0.15s',
+    position: 'relative'
+  },
+  teamCardIcon: { fontSize: '28px', marginBottom: '6px' },
+  teamCardName: { fontSize: '14px', fontWeight: '700', color: '#1a1a1a', marginBottom: '2px' },
+  teamCardCount: { fontSize: '12px', color: '#666' },
+  teamCardBadge: {
+    marginTop: '8px', display: 'inline-block', padding: '3px 10px',
+    borderRadius: '10px', fontSize: '11px', fontWeight: '700', color: 'white'
+  },
+  teamFullMsg: { marginTop: '12px', fontSize: '13px', color: '#DC2626', textAlign: 'center' },
   sectionTitle: {
     margin: '0 0 15px 0',
     fontSize: '16px',

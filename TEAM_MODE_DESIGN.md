@@ -25,6 +25,7 @@ This is a **build-ready blueprint, not code**. It is grounded in the actual curr
 13. AI-Readiness Notes
 14. Rollout Plan
 15. Open Questions
+16. UX Refinement Notes (from mockup review)
 
 ---
 
@@ -338,6 +339,41 @@ This phasing deliberately ships the highest-value, lowest-risk piece (fixing the
 - Should "Most Improved" compare against the student's history on quizzes covering the *same topic/tag*, or any quiz at all? (Depends on `Quiz.tags` existing — currently not part of the schema; see `DATABASE_BIBLE.md` §7.8 future-field proposals.)
 - Should a teacher be able to change `quizMode` after a quiz has already started? (Recommendation: no — lock it at `teacher:startQuiz`, same as the existing `sessionSettings` snapshot pattern already used for `Quiz.settings` more broadly, per `DATABASE_BIBLE.md` §8.1.)
 - Should Team Spirit and Most Improved be on by default, or opt-in? (Current recommendation in Section 9.1: Most Improved off by default since it depends on history existing across multiple quizzes, which a brand-new teacher/class won't have yet; everything else on by default.)
+
+---
+
+# 16. UX Refinement Notes (from mockup review)
+
+Captured from a design-mockup review pass (a separate prototyping tool, not this codebase — see `SYSTEM_ARCHITECTURE.md`/product notes for why that tool can't write into this repo directly). These are **visual/interaction refinements**, not changes to the underlying scoring or data model — Section 4.1's "one scoring engine, presentation differs by mode" principle is confirmed correct and unchanged by any of this. Filed here so they aren't lost between now (functional Phase 2) and later (visual Phase 3/5), and so nobody rebuilds these screens twice.
+
+## 16.1 Confirmed: one scoring engine, not two
+Re-confirms Section 4.1. A student's score is computed exactly once, the same way, regardless of mode. `Individual Mode` and `Team Mode` never diverge in *how* a point is earned — they only diverge in how the leaderboard *groups and displays* those already-computed scores (flat ranked list vs. grouped by team with an average). No second scoring path should ever be built.
+
+## 16.2 Lobby — team selection interaction (refines Section 3 / Section 7)
+- Team cards show a live player count per team (e.g. "🚀 Nova — 12/15"), updating as students join — this is the existing `team:assigned` broadcast from Section 11, just rendered as a count instead of a roster.
+- Tapping a team should feel tactile: the card grows slightly, a small confetti burst plays, and the student's avatar (once the avatar system exists — see 16.6) visually moves into that team's area. Purely a client-side animation reacting to the existing `team:assigned` confirmation event — no new socket event needed.
+
+## 16.3 Countdown — team branding (refines Section 7)
+- Keep the existing countdown design as-is (already considered strong).
+- Add a subtle background glow behind the countdown, colored per the student's own team (`settings.teamMode.teams[].color` from Section 9.1 — already modeled, just not yet used for this purpose). Individual mode: no team glow, unchanged appearance.
+
+## 16.4 Question screen — the momentum bar's exact placement (refines Section 5)
+- Confirms Section 5's momentum bar design — this review specifically wants it docked at the **top of the question screen itself** (not a separate overlay), visible continuously while a question is live, so students see their team "catching up" in real time without waiting for the leaderboard screen.
+- Streak/combo counters (`🔥 5`, `⚡ 2x`) should animate on change (a small bounce/scale when the number increments) rather than snapping instantly — a pure CSS transition, consistent with the animation patterns already in this codebase (see `UI_UX_ARCHITECTURE.md` §6).
+- Explicit constraint carried over from the mockup review: **do not make this visually noisy** — the momentum bar and streak animation are secondary information, not competing with the question text for attention.
+
+## 16.5 Correct / Wrong screens — richer, more informative reveal (refines Section 6)
+- **Correct**: in addition to the existing `+{points}` and speed-multiplier badge, show (team modes only) the team's contribution from this answer and any rank movement (e.g. "Rank ↑3"). All three values already exist in data the server sends (`answer:summary`'s `points`, plus the team aggregation from Section 4.2) — this is a display change, not a new computation.
+- **Wrong / Not Answered**: lead with the correct answer and (if present) its explanation, and show a short countdown to the next question, reinforcing that ClassVibe is a learning tool first, a competition second. This is the existing `answerSummary` view's explanation box, just re-emphasized in the layout — the underlying data (`explanation` field on `Quiz.questions[]`) is already sent today.
+
+## 16.6 One continuous flow, not disconnected screens (refines Section 7's flow diagram)
+The mockup review's core visual critique: today's question → correct/wrong → summary → leaderboard sequence should *feel* like one continuous animated sequence (card transitions, slide-downs, slide-ins) rather than a series of separate, disconnected views. This is purely a client-side transition/animation concern — **it does not change the socket event sequence in Section 7's flow diagram at all**, only how the existing view transitions are animated. Belongs with the Phase 5 animation work, alongside the momentum bar and awards reveal.
+
+## 16.7 End of Quiz — two distinct endings, not one shared screen
+Sharpens Section 8/Section 6: build the end-of-quiz screen as two genuinely separate layouts — an Individual Mode ending (personal rank, personal awards) and a Team Mode ending (winning team, team stats, then individual awards layered underneath, per Section 6's "everyone celebrates the team AND one student gets recognition"). Both read from the same underlying `QuizResult`/leaderboard data (Section 8) — this is a presentation branch on `quizMode`, not two separate data pipelines.
+
+## 16.8 Avatar system — reserve space now, build later
+Explicit instruction from the mockup review: do not build the avatar system yet, but every screen touched in Phase 3/5 should leave a placeholder space (e.g., a circular slot next to each leaderboard row, team card, and the lobby's player list) where a future full-body/avatar system can slot in without requiring another layout pass. Cheap to do while building these screens the first time; expensive to retrofit later.
 
 ---
 

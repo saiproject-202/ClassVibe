@@ -44,6 +44,12 @@ const quizSessionSchema = new mongoose.Schema({
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User'
     },
+    // Captured once at join time so leaderboards can show real names without an
+    // extra populate() on every read — see student:joinQuiz in quiz-socket-handlers.js
+    name: {
+      type: String,
+      default: ''
+    },
     joinedAt: {
       type: Date,
       default: Date.now
@@ -64,29 +70,53 @@ const quizSessionSchema = new mongoose.Schema({
       type: Number,
       default: 0
     },
-    completedAt: Date
+    completedAt: Date,
+    // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §9.2): references teams[].teamId below,
+    // or null in individual mode / before a student has picked a team
+    teamId: {
+      type: String,
+      default: null
+    }
   }],
-  
+
+  // ✅ NEW (Phase 3): snapshot of the team definitions for THIS session, copied from
+  // quiz.settings.teamMode.teams at session-creation time (see POST /:quizId/start-session
+  // in routes/quiz.js) — deliberately NOT read live off the Quiz template, so that teams
+  // exist and stay stable throughout the lobby/game even if the Quiz doc is edited later.
+  // Empty array in individual mode.
+  teams: [{
+    teamId: { type: String, required: true }, // slug of the team name — see quiz-socket-handlers.js
+    name:   String,
+    color:  String,
+    icon:   String
+  }],
+
   // When each question started
   questionStartTimes: [{
     questionIndex: Number,
     startedAt: Date
   }],
-  
+
   // Session timing
   startedAt: Date,
   pausedAt: Date,
   resumedAt: Date,
   completedAt: Date,
-  
+
   // Session settings (copied from quiz at start)
   sessionSettings: {
     totalTimeLimit: Number,
     showCorrectAnswer: Boolean,
     showLeaderboard: Boolean,
-    allowLateJoin: Boolean
+    allowLateJoin: Boolean,
+    // ✅ NEW (Phase 3): quizMode + team behavior flags, snapshotted alongside `teams`
+    // above so a running session's rules can't change out from under it mid-game
+    quizMode: String,
+    allowStudentChoice: Boolean,
+    autoBalance: Boolean,
+    lockOnStart: Boolean
   }
-  
+
 }, {
   timestamps: true
 });

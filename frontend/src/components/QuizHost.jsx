@@ -6,10 +6,22 @@
 // 4. REMOVED "Finish Quiz" button — last question footer now shows "End Quiz" same as header
 //    (End Quiz ends + auto-saves to history via server)
 // 5. Finished view: added "🔄 Create Again Quiz" button (calls onCreateAgain prop if provided)
-// 6. ALL other logic — timer, next question, start quiz — IDENTICAL
+// 6. Active view: added per-question leaderboard flash + final leaderboard with names
+// 7. Active view: header "End Quiz" (duplicated the footer one) replaced with Minimize +
+//    real browser Fullscreen toggle; footer "Minimize" removed (now lives in the header)
+// 8. ALL other logic — timer, next question, start quiz — IDENTICAL
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import socket from '../socket';
+
+// ✅ NEW (Phase 2): display metadata for each award type — icon + label only,
+// the actual winner/value comes from the server (quiz:awardsRevealed).
+const AWARD_META = {
+  fastestThinker: { icon: '⚡', label: 'Fastest Thinker' },
+  bestAccuracy:   { icon: '🎯', label: 'Best Accuracy' },
+  longestStreak:  { icon: '🔥', label: 'Longest Streak' },
+  mostImproved:   { icon: '📈', label: 'Most Improved' }
+};
 
 const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
   const [currentView, setCurrentView] = useState('preview'); // preview, active, finished
@@ -23,6 +35,37 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
   // "who's leading" panel is currently visible (auto-hides when the next question starts).
   const [leaderboard, setLeaderboard] = useState([]);
   const [showLeaderboardFlash, setShowLeaderboardFlash] = useState(false);
+  // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §4/§5): team-grouped leaderboard, shown instead
+  // of the flat list whenever non-empty (individual mode: always [])
+  const [teamLeaderboard, setTeamLeaderboard] = useState([]);
+  // ✅ NEW (Phase 5.3): live team momentum, empty in individual mode
+  const [momentum, setMomentum] = useState([]);
+  // ✅ NEW (Phase 5.4): top scorer for the question that just ended
+  const [questionMVP, setQuestionMVP] = useState(null);
+  // ✅ NEW (Phase 2 — TEAM_MODE_DESIGN.md): end-of-quiz awards, same data the students see
+  const [awards, setAwards] = useState([]);
+
+  // ✅ NEW: real browser fullscreen toggle (replaces the header's duplicate "End Quiz").
+  // fullscreenRef targets the whole overlay (backdrop + card), not just the card, so the
+  // browser's fullscreen view doesn't show anything but the quiz. isFullscreen is kept in
+  // sync via the 'fullscreenchange' event so it's correct even if a desktop teacher exits
+  // with Esc instead of clicking the button.
+  const fullscreenRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      fullscreenRef.current?.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.();
+    }
+  };
 
   // ========================================
   // SOCKET EVENT LISTENERS
@@ -89,7 +132,15 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
     socket.on('leaderboard:show', (data) => {
       console.log('🏆 Leaderboard (teacher view)');
       setLeaderboard(data.leaderboard || []);
+      setTeamLeaderboard(data.teamLeaderboard || []); // ✅ NEW (Phase 3)
+      setQuestionMVP(data.questionMVP || null); // ✅ NEW (Phase 5.4)
       setShowLeaderboardFlash(true);
+    });
+
+    // ✅ NEW (Phase 5.1): live team momentum bar, recomputed after every answer and
+    // at the start of every question
+    socket.on('team:momentumUpdate', (data) => {
+      setMomentum(data.teams || []);
     });
 
     // ✅ CHANGED: also handle 'quiz:finished' (sent by auto-complete) AND 'quiz:ended' (teacher end)
@@ -98,8 +149,15 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
     socket.on('quiz:finished', (data) => {
       console.log('🏁 Quiz finished');
       if (data?.leaderboard) setLeaderboard(data.leaderboard);
+      setTeamLeaderboard(data?.teamLeaderboard || []); // ✅ NEW (Phase 3)
       setShowLeaderboardFlash(false);
       setCurrentView('finished');
+    });
+
+    // ✅ NEW (Phase 2): arrives a moment after quiz:finished, once results are saved
+    socket.on('quiz:awardsRevealed', (data) => {
+      console.log('🏅 Awards revealed:', data.awards);
+      setAwards(data.awards || []);
     });
 
     socket.on('error', (data) => {
@@ -114,7 +172,9 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
       socket.off('quiz:started');
       socket.off('quiz:nextQuestion');
       socket.off('leaderboard:show');
+      socket.off('team:momentumUpdate');
       socket.off('quiz:finished');
+      socket.off('quiz:awardsRevealed');
       socket.off('error');
     };
   }, [sessionId]);
@@ -146,8 +206,9 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
     onCreateAgain ? onCreateAgain() : onClose();
   };
 
-  // ✅ NEW: leaderboard entries only carry a userId — look up the real name we already
-  // tracked from 'student:joined' so both the flash panel and the final leaderboard can show it
+  // ✅ NEW: the server now sends a real name on every leaderboard entry (entry.name).
+  // This is a fallback for older cached data only — looks up the name we tracked
+  // locally from 'student:joined' in case entry.name is ever missing.
   const getStudentName = (userId) => {
     const match = students.find(s => String(s.userId) === String(userId));
     return match?.name || 'Student';
@@ -250,23 +311,43 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
     const progressPercent = ((currentQuestionIndex + 1) / totalQuestions) * 100;
 
     return (
-      <div style={styles.overlay}>
+      <div style={styles.overlay} ref={fullscreenRef}>
         <div style={styles.modalActive}>
           {/* ✅ NEW: brief "who's leading" panel — mirrors what students see after each question.
               Appears when the server sends leaderboard:show, disappears when the next question starts. */}
           {showLeaderboardFlash && (
             <div style={styles.leaderboardFlash}>
               <div style={styles.leaderboardFlashHeader}>🏆 Leaderboard</div>
+              {/* ✅ NEW (Phase 5.4): top scorer for the question that just ended */}
+              {questionMVP && (
+                <div style={styles.questionMvpFlash}>
+                  ⭐ MVP: <strong>{questionMVP.name}</strong> (+{questionMVP.points})
+                </div>
+              )}
               <div style={styles.leaderboardFlashList}>
-                {leaderboard.slice(0, 5).map((entry) => (
-                  <div key={entry.userId} style={styles.leaderboardFlashItem}>
-                    <span style={styles.leaderboardFlashRank}>#{entry.rank}</span>
-                    <span style={styles.leaderboardFlashName}>{getStudentName(entry.userId)}</span>
-                    <span style={styles.leaderboardFlashScore}>{entry.score} pts</span>
-                  </div>
-                ))}
-                {leaderboard.length === 0 && (
-                  <div style={styles.leaderboardFlashEmpty}>No answers yet</div>
+                {/* ✅ NEW (Phase 3): team mode shows team averages here instead of
+                    individual rows — compact panel, so no nested member list */}
+                {teamLeaderboard.length > 0 ? (
+                  teamLeaderboard.map((team) => (
+                    <div key={team.teamId} style={styles.leaderboardFlashItem}>
+                      <span style={styles.leaderboardFlashRank}>#{team.rank}</span>
+                      <span style={styles.leaderboardFlashName}>{team.icon} {team.name}</span>
+                      <span style={styles.leaderboardFlashScore}>{team.averageScore} avg</span>
+                    </div>
+                  ))
+                ) : (
+                  <>
+                    {leaderboard.slice(0, 5).map((entry) => (
+                      <div key={entry.userId} style={styles.leaderboardFlashItem}>
+                        <span style={styles.leaderboardFlashRank}>#{entry.rank}</span>
+                        <span style={styles.leaderboardFlashName}>{entry.name || getStudentName(entry.userId)}</span>
+                        <span style={styles.leaderboardFlashScore}>{entry.score} pts</span>
+                      </div>
+                    ))}
+                    {leaderboard.length === 0 && (
+                      <div style={styles.leaderboardFlashEmpty}>No answers yet</div>
+                    )}
+                  </>
                 )}
               </div>
             </div>
@@ -282,6 +363,26 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
               <p style={styles.progressText}>
                 Question {currentQuestionIndex + 1} of {totalQuestions}
               </p>
+              {/* ✅ NEW (Phase 5.3): live team momentum bar, empty in individual mode */}
+              {momentum.length > 0 && (
+                <div style={styles.momentumBar}>
+                  {momentum.map((team) => (
+                    <div
+                      key={team.teamId}
+                      style={{
+                        ...styles.momentumSegment,
+                        width: `${team.percentage}%`,
+                        backgroundColor: team.color || '#10B981'
+                      }}
+                      title={`${team.icon || ''} ${team.name}: ${team.percentage}%`}
+                    >
+                      {team.percentage >= 12 && (
+                        <span style={styles.momentumLabel}>{team.icon} {team.percentage}%</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={styles.headerControls}>
               {/* Timer — color turns red when ≤10s */}
@@ -298,9 +399,16 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
                   {timeRemaining}s
                 </div>
               </div>
-              {/* ✅ CHANGED: only ONE "End Quiz" button — no separate Finish Quiz */}
-              <button onClick={handleEndQuiz} style={styles.endBtn}>
-                🔴 End Quiz
+              {/* ✅ CHANGED: the header used to have its own "End Quiz" button, duplicating
+                  the one in the footer (visible at the same time on the last question).
+                  Replaced with minimize (steps away without ending the quiz — same as the
+                  old footer "Minimize" button, just relocated) and a fullscreen toggle.
+                  Ending the quiz now only happens via the single footer button. */}
+              <button onClick={onClose} style={styles.iconBtn} title="Minimize">
+                🗕
+              </button>
+              <button onClick={toggleFullscreen} style={styles.iconBtn} title={isFullscreen ? 'Exit Full Screen' : 'Full Screen'}>
+                {isFullscreen ? '🗗' : '⛶'}
               </button>
             </div>
           </div>
@@ -406,9 +514,9 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
           </div>
 
           {/* Footer Controls */}
+          {/* ✅ CHANGED: "Minimize" removed from here — it now lives as an icon in the
+              header (next to the fullscreen toggle) instead of duplicating that action */}
           <div style={styles.footerActive}>
-            <button onClick={onClose} style={styles.minimizeBtn}>Minimize</button>
-
             {currentQuestionIndex < totalQuestions - 1 ? (
               <button onClick={handleNextQuestion} style={styles.nextBtn}>
                 Next Question →
@@ -440,21 +548,70 @@ const QuizHost = ({ quiz, sessionId, onClose, onCreateAgain }) => {
 
             {/* ✅ NEW: final class leaderboard — was completely missing before, teacher saw
                 no results at all when a quiz ended. A fancier podium/1st-2nd-3rd visual is a
-                future polish pass; this is the working data version. */}
-            {leaderboard.length > 0 && (
+                future polish pass; this is the working data version.
+                ✅ NEW (Phase 3): team mode shows team cards with members nested underneath
+                instead of the flat individual list — same scores, grouped presentation. */}
+            {teamLeaderboard.length > 0 ? (
+              <div style={styles.finalLeaderboardSection}>
+                <h3 style={styles.finalLeaderboardTitle}>🏆 Final Leaderboard</h3>
+                <div style={styles.finalLeaderboardList}>
+                  {teamLeaderboard.map((team) => (
+                    <div key={team.teamId} style={styles.teamFinalCard}>
+                      <div style={styles.teamFinalHeader}>
+                        <span style={styles.finalLeaderboardRank}>#{team.rank}</span>
+                        <span style={styles.teamFinalIcon}>{team.icon}</span>
+                        <span style={styles.finalLeaderboardName}>{team.name}</span>
+                        <span style={styles.finalLeaderboardScore}>{team.averageScore} avg</span>
+                      </div>
+                      <div style={styles.teamFinalMembers}>
+                        {team.members.map((m) => (
+                          <div key={m.userId} style={styles.teamFinalMemberRow}>
+                            <span>{m.name || getStudentName(m.userId)}</span>
+                            <span>{m.score} pts</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : leaderboard.length > 0 && (
               <div style={styles.finalLeaderboardSection}>
                 <h3 style={styles.finalLeaderboardTitle}>🏆 Final Leaderboard</h3>
                 <div style={styles.finalLeaderboardList}>
                   {leaderboard.map((entry) => (
                     <div key={entry.userId} style={styles.finalLeaderboardItem}>
                       <span style={styles.finalLeaderboardRank}>#{entry.rank}</span>
-                      <span style={styles.finalLeaderboardName}>{getStudentName(entry.userId)}</span>
+                      <span style={styles.finalLeaderboardName}>{entry.name || getStudentName(entry.userId)}</span>
                       <span style={styles.finalLeaderboardScore}>{entry.score} pts</span>
                       <span style={styles.finalLeaderboardMeta}>
                         {entry.correctAnswers}/{entry.totalAnswers} correct
                       </span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* ✅ NEW (Phase 2): Class Highlights — same awards students see. Doesn't
+                render an award that has no eligible winner (e.g. no quiz history yet
+                for "Most Improved") rather than showing an empty slot. */}
+            {awards.length > 0 && (
+              <div style={styles.awardsCard}>
+                <h3 style={styles.finalLeaderboardTitle}>🏅 Class Highlights</h3>
+                <div style={styles.awardsList}>
+                  {awards.map((award, i) => {
+                    const meta = AWARD_META[award.type] || { icon: '🏅', label: award.type };
+                    return (
+                      <div key={i} style={styles.awardItem}>
+                        <span style={styles.awardIcon}>{meta.icon}</span>
+                        <div style={styles.awardInfo}>
+                          <div style={styles.awardLabel}>{meta.label}</div>
+                          <div style={styles.awardWinner}>{award.name} — {award.value}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -517,6 +674,12 @@ const styles = {
   leaderboardFlashName: { flex: 1, fontWeight: '600', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   leaderboardFlashScore: { fontWeight: '700', color: '#10B981' },
   leaderboardFlashEmpty: { padding: '12px', fontSize: '13px', color: '#9CA3AF', textAlign: 'center' },
+  // ✅ NEW (Phase 5.4): MVP line inside the leaderboard flash panel
+  questionMvpFlash: { padding: '8px 16px', backgroundColor: '#FFF7E6', color: '#92400E', fontSize: '12px', fontWeight: '600', borderBottom: '1px solid #FFD580' },
+  // ✅ NEW (Phase 5.3): live momentum bar (teacher header)
+  momentumBar: { display: 'flex', width: '300px', height: '10px', borderRadius: '6px', overflow: 'hidden', marginTop: '6px', backgroundColor: 'rgba(255,255,255,0.3)' },
+  momentumSegment: { display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'width 0.6s ease', minWidth: '2%' },
+  momentumLabel: { fontSize: '9px', fontWeight: '700', color: 'white', whiteSpace: 'nowrap' },
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
     padding: '25px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: '#4F46E5'
@@ -556,11 +719,16 @@ const styles = {
   progressBar: { width: '300px', height: '8px', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: '10px', overflow: 'hidden', marginBottom: '5px' },
   progressFill: { height: '100%', backgroundColor: '#10B981', transition: 'width 0.3s ease' },
   progressText: { fontSize: '13px', color: '#E0E7FF', margin: 0 },
-  headerControls: { display: 'flex', alignItems: 'center', gap: '15px' },
+  headerControls: { display: 'flex', alignItems: 'center', gap: '10px' },
   timerDisplay: { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 20px', borderRadius: '25px', transition: 'background-color 0.3s' },
   timerIcon: { fontSize: '20px' },
   timerText: { fontSize: '20px', fontWeight: '700', transition: 'color 0.3s' },
-  endBtn: { padding: '10px 20px', fontSize: '14px', fontWeight: '600', backgroundColor: '#EF4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
+  // ✅ NEW: small icon buttons (minimize, fullscreen toggle) — replaces the old header endBtn
+  iconBtn: {
+    width: '38px', height: '38px', display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: '18px', backgroundColor: 'rgba(255,255,255,0.2)', color: 'white',
+    border: 'none', borderRadius: '8px', cursor: 'pointer', flexShrink: 0
+  },
 
   // Active content
   contentActive: { flex: 1, display: 'grid', gridTemplateColumns: '1.5fr 1fr', gap: '20px', padding: '25px', overflowY: 'auto' },
@@ -597,8 +765,9 @@ const styles = {
   studentAnsweredBadge: { fontSize: '16px', color: '#10B981' },
 
   // Footer active
-  footerActive: { display: 'flex', justifyContent: 'space-between', padding: '20px 30px', borderTop: '2px solid #f0f0f0' },
-  minimizeBtn: { padding: '12px 24px', fontSize: '14px', fontWeight: '600', backgroundColor: '#F3F4F6', color: '#374151', border: 'none', borderRadius: '10px', cursor: 'pointer' },
+  // ✅ CHANGED: was 'space-between' to spread Minimize + the action button apart;
+  // now only one button remains, so it's right-aligned like a normal footer CTA
+  footerActive: { display: 'flex', justifyContent: 'flex-end', padding: '20px 30px', borderTop: '2px solid #f0f0f0' },
   nextBtn: { padding: '12px 28px', fontSize: '14px', fontWeight: '700', backgroundColor: '#4F46E5', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)' },
   // ✅ NEW: End Quiz on last question — red, same as header endBtn
   endQuizLastBtn: { padding: '12px 28px', fontSize: '14px', fontWeight: '700', backgroundColor: '#EF4444', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)' },
@@ -621,6 +790,20 @@ const styles = {
   finalLeaderboardName: { flex: 1, fontWeight: '600', color: '#374151', textAlign: 'left' },
   finalLeaderboardScore: { fontWeight: '700', color: '#10B981' },
   finalLeaderboardMeta: { fontSize: '12px', color: '#6B7280', minWidth: '90px', textAlign: 'right' },
+  // ✅ NEW (Phase 3): team final leaderboard cards
+  teamFinalCard: { border: '1px solid #E5E7EB', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' },
+  teamFinalHeader: { display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', backgroundColor: '#F9FAFB' },
+  teamFinalIcon: { fontSize: '16px' },
+  teamFinalMembers: { padding: '6px 14px 10px 52px', display: 'flex', flexDirection: 'column', gap: '4px' },
+  teamFinalMemberRow: { display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#4B5563' },
+  // ✅ NEW (Phase 2): Class Highlights / awards card
+  awardsCard: { textAlign: 'left', marginBottom: '30px', maxWidth: '480px', marginLeft: 'auto', marginRight: 'auto', backgroundColor: '#F5F3FF', border: '2px solid #DDD6FE', borderRadius: '14px', padding: '18px' },
+  awardsList: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  awardItem: { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderRadius: '10px', backgroundColor: 'white' },
+  awardIcon: { fontSize: '22px', flexShrink: 0 },
+  awardInfo: { flex: 1, minWidth: 0 },
+  awardLabel: { fontSize: '12px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.3px' },
+  awardWinner: { fontSize: '14px', fontWeight: '600', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   // ✅ NEW: two-button layout in finished view
   finishedActions: { display: 'flex', flexDirection: 'column', gap: '12px', alignItems: 'center' },
   createAgainBtn: {

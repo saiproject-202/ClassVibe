@@ -408,15 +408,46 @@ router.post('/:quizId/start-session', authenticateToken, async (req, res) => {
       return res.json({ success: true, session: existing });
     }
  
+    // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §9.2): snapshot team config onto the session
+    // at creation time, independent of the Quiz template, so teams exist during the
+    // waiting lobby and stay stable even if the Quiz doc is edited mid-session.
+    // ✅ CHANGED (Phase 4): any non-individual mode gets a team snapshot — Random Teams
+    // and School House reuse the exact same team-mode engine as Team Battle, they only
+    // differ in how QuizCreator pre-fills the team names/colors before saving.
+    const quizMode = quiz.settings?.quizMode || 'individual';
+    let sessionTeams = [];
+    if (quizMode !== 'individual' && Array.isArray(quiz.settings?.teamMode?.teams)) {
+      const seenSlugs = new Set();
+      sessionTeams = quiz.settings.teamMode.teams
+        .filter(t => t.name && t.name.trim())
+        .map((t, index) => {
+          let slug = t.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
+          if (!slug || seenSlugs.has(slug)) slug = `team-${index + 1}`; // fallback for empty/duplicate names
+          seenSlugs.add(slug);
+          return { teamId: slug, name: t.name.trim(), color: t.color || '', icon: t.icon || '' };
+        });
+    }
+
     // Create new session
     const session = new QuizSession({
       quiz: quizId,
       group: quiz.group,
       host: req.userId,
       status: 'waiting',
-      participants: []
+      participants: [],
+      teams: sessionTeams,
+      sessionSettings: {
+        totalTimeLimit:      quiz.settings?.totalTimeLimit,
+        showCorrectAnswer:   quiz.settings?.showCorrectAnswer,
+        showLeaderboard:     quiz.settings?.showLeaderboard,
+        allowLateJoin:       quiz.settings?.allowLateJoin,
+        quizMode,
+        allowStudentChoice:  quiz.settings?.teamMode?.allowStudentChoice ?? true,
+        autoBalance:         quiz.settings?.teamMode?.autoBalance ?? true,
+        lockOnStart:         quiz.settings?.teamMode?.lockOnStart ?? true
+      }
     });
- 
+
     await session.save();
     await session.populate('quiz');
  

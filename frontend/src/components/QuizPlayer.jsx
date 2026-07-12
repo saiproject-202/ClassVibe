@@ -9,9 +9,30 @@
 // 3. Timer display was showing just the number without context when at 0 on mount.
 //    FIX: only render timer when timeRemaining > 0 or quiz is active.
 // ALL other logic — answer types, scoring, leaderboard, finished view — IDENTICAL.
+// 4. "Not answered" now shows correctly instead of "Wrong"/"Incorrect" — the old check
+//    only recognized selectedAnswer === null, but MC/true-false sends -1 and
+//    multiple-select sends [] when nothing was picked, so both fell through to "Wrong".
 
 import React, { useState, useEffect, useRef } from 'react';
 import socket from '../socket';
+
+// ✅ NEW (Phase 2): display metadata for each award type — icon + label only,
+// the actual winner/value comes from the server (quiz:awardsRevealed).
+const AWARD_META = {
+  fastestThinker: { icon: '⚡', label: 'Fastest Thinker' },
+  bestAccuracy:   { icon: '🎯', label: 'Best Accuracy' },
+  longestStreak:  { icon: '🔥', label: 'Longest Streak' },
+  mostImproved:   { icon: '📈', label: 'Most Improved' }
+};
+
+// ✅ NEW: true if the student genuinely didn't pick anything for this question,
+// covering every question type's "nothing selected" shape (not just null).
+const isUnanswered = (selectedAnswer, questionType) => {
+  if (selectedAnswer === null || selectedAnswer === undefined) return true;
+  if (questionType === 'multiple_select') return !Array.isArray(selectedAnswer) || selectedAnswer.length === 0;
+  if (questionType === 'fill_in_blank') return typeof selectedAnswer !== 'string' || selectedAnswer.trim() === '';
+  return selectedAnswer === -1;
+};
 
 const QuizPlayer = ({ sessionId, onClose }) => {
   const [currentView, setCurrentView] = useState('loading');
@@ -37,6 +58,21 @@ const QuizPlayer = ({ sessionId, onClose }) => {
   const [leaderboard, setLeaderboard] = useState([]);
   const [myRank, setMyRank] = useState(null);
   const [finalTab, setFinalTab] = useState('leaderboard');
+  // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §4/§5): grouped-by-team leaderboard, empty
+  // array in individual mode. When present, it's shown INSTEAD of the flat individual
+  // list — same underlying scores, just grouped (see §16.1: one scoring engine, only
+  // the leaderboard presentation differs by mode).
+  const [teamLeaderboard, setTeamLeaderboard] = useState([]);
+  const [myTeamId, setMyTeamId] = useState(null);
+  // ✅ NEW (Phase 5.3): live team momentum — recomputed after every answer, empty
+  // array in individual mode (see computeMomentum in quiz-socket-handlers.js)
+  const [momentum, setMomentum] = useState([]);
+  // ✅ NEW (Phase 5.4): top scorer for the question that just ended, shown on the
+  // mid-quiz leaderboard flash
+  const [questionMVP, setQuestionMVP] = useState(null);
+  // ✅ NEW (Phase 2 — TEAM_MODE_DESIGN.md): end-of-quiz awards (Fastest Thinker,
+  // Best Accuracy, Longest Streak, Most Improved), revealed shortly after quiz:finished
+  const [awards, setAwards] = useState([]);
 
   const userId = useRef(JSON.parse(localStorage.getItem('user'))?.id).current;
 
@@ -109,6 +145,7 @@ const QuizPlayer = ({ sessionId, onClose }) => {
     socket.on('quiz:joined', (data) => {
       console.log('✅ Joined quiz:', data);
       setTotalQuestions(data.totalQuestions);
+      setMyTeamId(data.myTeamId || null); // ✅ NEW (Phase 3) — null in individual mode
 
       if (data.status === 'active' && data.currentQuestion) {
         const q = data.currentQuestion.question || data.currentQuestion;
@@ -205,11 +242,19 @@ const QuizPlayer = ({ sessionId, onClose }) => {
     socket.on('leaderboard:show', (data) => {
       console.log('🏆 Leaderboard');
       setLeaderboard(data.leaderboard);
+      setTeamLeaderboard(data.teamLeaderboard || []); // ✅ NEW (Phase 3)
+      setQuestionMVP(data.questionMVP || null); // ✅ NEW (Phase 5.4)
       const myRankData = data.leaderboard.find(
         entry => String(entry.userId) === String(userId)
       );
       setMyRank(myRankData ? myRankData.rank : null);
       setCurrentView('leaderboard');
+    });
+
+    // ✅ NEW (Phase 5.1): live team momentum bar, recomputed after every answer and
+    // at the start of every question
+    socket.on('team:momentumUpdate', (data) => {
+      setMomentum(data.teams || []);
     });
 
     socket.on('quiz:nextQuestion', (data) => {
@@ -231,7 +276,14 @@ const QuizPlayer = ({ sessionId, onClose }) => {
         );
         setMyRank(myRankData ? myRankData.rank : null);
       }
+      setTeamLeaderboard(data?.teamLeaderboard || []); // ✅ NEW (Phase 3)
       setCurrentView('finished');
+    });
+
+    // ✅ NEW (Phase 2): arrives a moment after quiz:finished, once results are saved
+    socket.on('quiz:awardsRevealed', (data) => {
+      console.log('🏅 Awards revealed:', data.awards);
+      setAwards(data.awards || []);
     });
 
     socket.on('error', (data) => {
@@ -246,8 +298,10 @@ const QuizPlayer = ({ sessionId, onClose }) => {
       socket.off('answer:summary');
       socket.off('question:complete');
       socket.off('leaderboard:show');
+      socket.off('team:momentumUpdate');
       socket.off('quiz:nextQuestion');
       socket.off('quiz:finished');
+      socket.off('quiz:awardsRevealed');
       socket.off('error');
     };
   // ✅ FIX: ONLY sessionId in dependency array — this is the critical fix
@@ -304,6 +358,68 @@ const QuizPlayer = ({ sessionId, onClose }) => {
   // ========================================
   // RENDER FUNCTIONS
   // ========================================
+
+  // ✅ NEW (Phase 5.3 — TEAM_MODE_DESIGN.md §16.4): live momentum bar, a single stacked
+  // bar showing each team's current share of the standings. Widths are percentages that
+  // always sum to 100 (see computeMomentum on the backend), so this is purely a display
+  // of already-computed values — no scoring logic lives here.
+  const renderMomentumBar = () => (
+    <div style={styles.momentumBar}>
+      {momentum.map((team) => (
+        <div
+          key={team.teamId}
+          style={{
+            ...styles.momentumSegment,
+            width: `${team.percentage}%`,
+            backgroundColor: team.color || '#4F46E5',
+            outline: team.teamId === myTeamId ? '2px solid #fff' : 'none',
+            outlineOffset: team.teamId === myTeamId ? '-2px' : '0'
+          }}
+          title={`${team.icon || ''} ${team.name}: ${team.percentage}%`}
+        >
+          {team.percentage >= 12 && (
+            <span style={styles.momentumLabel}>{team.icon} {team.percentage}%</span>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+
+  // ✅ NEW (Phase 3 — TEAM_MODE_DESIGN.md §4.2/§5): team-grouped leaderboard, shown
+  // INSTEAD of the flat individual list whenever teamLeaderboard is non-empty. Ranked
+  // by Team Rating (already sorted server-side); shows Average Score per §4.2 ("never
+  // use total, since a bigger team would win purely on headcount"), with each member's
+  // own score listed underneath, matching the design doc's worked example format.
+  const renderTeamLeaderboard = () => (
+    <div style={styles.teamLbList}>
+      {teamLeaderboard.map((team) => (
+        <div
+          key={team.teamId}
+          style={{
+            ...styles.teamLbCard,
+            borderColor: team.teamId === myTeamId ? (team.color || '#4F46E5') : '#e0e0e0'
+          }}
+        >
+          <div style={styles.teamLbHeader}>
+            <span style={styles.teamLbRank}>#{team.rank}</span>
+            <span style={styles.teamLbIcon}>{team.icon}</span>
+            <span style={styles.teamLbName}>{team.name}</span>
+            <span style={styles.teamLbScore}>{team.averageScore} avg</span>
+          </div>
+          <div style={styles.teamLbMembers}>
+            {team.members.map((m) => (
+              <div key={m.userId} style={styles.teamLbMemberRow}>
+                <span style={{ ...styles.teamLbMemberName, fontWeight: String(m.userId) === String(userId) ? '700' : '500' }}>
+                  {m.name}{String(m.userId) === String(userId) ? ' (You)' : ''}
+                </span>
+                <span style={styles.teamLbMemberScore}>{m.score} pts</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
 
   const renderQuestionInput = () => {
     const questionType = currentQuestion?.questionType || 'multiple_choice';
@@ -490,6 +606,8 @@ const QuizPlayer = ({ sessionId, onClose }) => {
             </div>
           </div>
 
+          {momentum.length > 0 && renderMomentumBar()}
+
           <div style={styles.questionBox}>
             <h2 style={styles.questionText}>{currentQuestion?.questionText}</h2>
             <div style={styles.questionPoints}>{currentQuestion?.points || 10} points</div>
@@ -533,7 +651,7 @@ const QuizPlayer = ({ sessionId, onClose }) => {
             <div style={styles.resultIcon}>{isCorrect ? '✅' : '❌'}</div>
             <div style={styles.resultText}>
               <h2 style={{ ...styles.resultTitle, color: isCorrect ? '#1B5E20' : '#C62828' }}>
-                {isCorrect ? 'Correct!' : answerSummary?.selectedAnswer === null ? 'Time Expired!' : 'Incorrect'}
+                {isCorrect ? 'Correct!' : isUnanswered(answerSummary?.selectedAnswer, questionType) ? 'Not Answered' : 'Incorrect'}
               </h2>
               <p style={styles.resultPoints}>
                 {isCorrect ? `+${answerSummary?.points} points` : '+0 points'}
@@ -615,20 +733,34 @@ const QuizPlayer = ({ sessionId, onClose }) => {
       <div style={styles.overlay}>
         <div style={styles.container}>
           <h2 style={styles.leaderboardTitle}>🏆 Leaderboard</h2>
-          <div style={styles.leaderboardList}>
-            {leaderboard.map((entry, index) => (
-              <div key={index} style={{ ...styles.leaderboardItem, backgroundColor: String(entry.userId) === String(userId) ? '#FFF9C4' : '#fff' }}>
-                <div style={styles.rank}>#{entry.rank}</div>
-                <div style={styles.playerInfo}>
-                  <div style={styles.playerScore}>{entry.score} pts</div>
-                  <div style={styles.playerStats}>
-                    {entry.correctAnswers}/{entry.totalAnswers} correct
-                    {entry.streak > 0 && ` • 🔥 ${entry.streak}`}
+          {/* ✅ NEW (Phase 5.4): callout for whoever scored highest on the question
+              that just ended (null if nobody answered it correctly) */}
+          {questionMVP && (
+            <div style={styles.questionMvpBanner}>
+              ⭐ Question MVP: <strong>{String(questionMVP.userId) === String(userId) ? 'You' : questionMVP.name}</strong> (+{questionMVP.points} pts)
+            </div>
+          )}
+          {/* ✅ NEW (Phase 3): team leaderboard replaces the flat list in team mode —
+              same underlying scores, just grouped (see §16.1) */}
+          {teamLeaderboard.length > 0 ? renderTeamLeaderboard() : (
+            <div style={styles.leaderboardList}>
+              {leaderboard.map((entry, index) => (
+                <div key={index} style={{ ...styles.leaderboardItem, backgroundColor: String(entry.userId) === String(userId) ? '#FFF9C4' : '#fff' }}>
+                  <div style={styles.rank}>#{entry.rank}</div>
+                  <div style={styles.playerInfo}>
+                    <div style={styles.playerNameRow}>
+                      <span style={styles.playerName}>{entry.name || 'Student'}</span>
+                      <span style={styles.playerScore}>{entry.score} pts</span>
+                    </div>
+                    <div style={styles.playerStats}>
+                      {entry.correctAnswers}/{entry.totalAnswers} correct
+                      {entry.streak > 0 && ` • 🔥 ${entry.streak}`}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           <div style={styles.waitNextMessage}>
             <div style={styles.waitSpinner}></div>
             Next question loading...
@@ -644,6 +776,32 @@ const QuizPlayer = ({ sessionId, onClose }) => {
       <div style={styles.overlay}>
         <div style={styles.container}>
           <h2 style={styles.finishedTitle}>🏁 Quiz Completed!</h2>
+
+          {/* ✅ NEW (Phase 2): Class Highlights — arrives shortly after quiz:finished,
+              once the server has saved results and computed awards. Simply doesn't
+              render if an award type has no eligible winner (e.g. no one has quiz
+              history yet for "Most Improved") rather than showing an empty slot. */}
+          {awards.length > 0 && (
+            <div style={styles.awardsCard}>
+              <div style={styles.awardsTitle}>🏅 Class Highlights</div>
+              <div style={styles.awardsList}>
+                {awards.map((award, i) => {
+                  const meta = AWARD_META[award.type] || { icon: '🏅', label: award.type };
+                  const isMe = String(award.userId) === String(userId);
+                  return (
+                    <div key={i} style={{ ...styles.awardItem, backgroundColor: isMe ? '#FFF9C4' : '#F9FAFB' }}>
+                      <span style={styles.awardIcon}>{meta.icon}</span>
+                      <div style={styles.awardInfo}>
+                        <div style={styles.awardLabel}>{meta.label}</div>
+                        <div style={styles.awardWinner}>{award.name}{isMe ? ' (You!)' : ''} — {award.value}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div style={styles.tabs}>
             <button onClick={() => setFinalTab('leaderboard')} style={{ ...styles.tab, ...(finalTab === 'leaderboard' ? styles.tabActive : {}) }}>🏆 Leaderboard</button>
             <button onClick={() => setFinalTab('review')} style={{ ...styles.tab, ...(finalTab === 'review' ? styles.tabActive : {}) }}>📊 My Review</button>
@@ -655,19 +813,34 @@ const QuizPlayer = ({ sessionId, onClose }) => {
                 <div style={styles.myRankCard}>
                   <div style={styles.myRankText}>Your Rank: #{myRank}</div>
                   <div style={styles.myScoreText}>{myScore} points</div>
+                  {/* ✅ NEW (Phase 3): team rank shown alongside personal rank */}
+                  {teamLeaderboard.length > 0 && myTeamId && (() => {
+                    const myTeam = teamLeaderboard.find(t => t.teamId === myTeamId);
+                    return myTeam ? (
+                      <div style={styles.myTeamRankText}>
+                        {myTeam.icon} {myTeam.name} — Team Rank #{myTeam.rank}
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
               )}
-              <div style={styles.leaderboardList}>
-                {leaderboard.map((entry, index) => (
-                  <div key={index} style={{ ...styles.leaderboardItem, backgroundColor: String(entry.userId) === String(userId) ? '#FFF9C4' : '#fff' }}>
-                    <div style={styles.rank}>#{entry.rank}</div>
-                    <div style={styles.playerInfo}>
-                      <div style={styles.playerScore}>{entry.score} pts</div>
-                      <div style={styles.playerStats}>{entry.correctAnswers}/{entry.totalAnswers} correct{entry.streak > 0 && ` • 🔥 ${entry.streak}`}</div>
+              {/* ✅ NEW (Phase 3): team leaderboard replaces the flat list in team mode */}
+              {teamLeaderboard.length > 0 ? renderTeamLeaderboard() : (
+                <div style={styles.leaderboardList}>
+                  {leaderboard.map((entry, index) => (
+                    <div key={index} style={{ ...styles.leaderboardItem, backgroundColor: String(entry.userId) === String(userId) ? '#FFF9C4' : '#fff' }}>
+                      <div style={styles.rank}>#{entry.rank}</div>
+                      <div style={styles.playerInfo}>
+                        <div style={styles.playerNameRow}>
+                          <span style={styles.playerName}>{entry.name || 'Student'}</span>
+                          <span style={styles.playerScore}>{entry.score} pts</span>
+                        </div>
+                        <div style={styles.playerStats}>{entry.correctAnswers}/{entry.totalAnswers} correct{entry.streak > 0 && ` • 🔥 ${entry.streak}`}</div>
+                      </div>
                     </div>
-                  </div>
-                ))}
-              </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -679,16 +852,42 @@ const QuizPlayer = ({ sessionId, onClose }) => {
                 <div style={styles.summaryCard}><div style={styles.summaryLabel}>Best Streak</div><div style={styles.summaryValue}>🔥 {myStreak}</div></div>
               </div>
               <div style={styles.answersList}>
-                {myAnswers.map((answer, index) => (
-                  <div key={index} style={styles.answerCard}>
-                    <div style={styles.answerHeader}>
-                      <div style={styles.answerNumber}>Q{index + 1}</div>
-                      <div style={{ ...styles.answerResult, color: answer.isCorrect ? '#4CAF50' : '#F44336' }}>{answer.isCorrect ? '✅ Correct' : '❌ Wrong'}</div>
-                      <div style={styles.answerPoints}>+{answer.points} pts</div>
+                {/* ✅ FIXED: was only listing questions this device actually received
+                    (myAnswers) — a student who joined late (e.g. at Q4) would see Q1-Q3
+                    silently missing from their review with no explanation. Now every
+                    question in the quiz gets a row, with a clear placeholder for any
+                    the student wasn't present for. */}
+                {Array.from({ length: totalQuestions }, (_, i) => i).map((qIndex) => {
+                  const answer = myAnswers.find(a => a.questionIndex === qIndex);
+                  if (!answer) {
+                    return (
+                      <div key={qIndex} style={{ ...styles.answerCard, opacity: 0.6 }}>
+                        <div style={styles.answerHeader}>
+                          <div style={styles.answerNumber}>Q{qIndex + 1}</div>
+                          <div style={{ ...styles.answerResult, color: '#9CA3AF' }}>❓ Not answered</div>
+                          <div style={styles.answerPoints}>+0 pts</div>
+                        </div>
+                        <div style={styles.answerQuestion}>You joined after this question was shown.</div>
+                      </div>
+                    );
+                  }
+                  // ✅ FIXED: a student present for the question but who never picked
+                  // anything before time ran out used to show "❌ Wrong" — now shows
+                  // "Not Answered" instead, distinct from an actually-wrong answer.
+                  const notAnswered = !answer.isCorrect && isUnanswered(answer.selectedAnswer, answer.questionType);
+                  return (
+                    <div key={qIndex} style={styles.answerCard}>
+                      <div style={styles.answerHeader}>
+                        <div style={styles.answerNumber}>Q{qIndex + 1}</div>
+                        <div style={{ ...styles.answerResult, color: answer.isCorrect ? '#4CAF50' : notAnswered ? '#9CA3AF' : '#F44336' }}>
+                          {answer.isCorrect ? '✅ Correct' : notAnswered ? '❓ Not Answered' : '❌ Wrong'}
+                        </div>
+                        <div style={styles.answerPoints}>+{answer.points} pts</div>
+                      </div>
+                      <div style={styles.answerQuestion}>{answer.questionText}</div>
                     </div>
-                    <div style={styles.answerQuestion}>{answer.questionText}</div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
@@ -778,9 +977,20 @@ const styles = {
   leaderboardItem: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', borderRadius: '10px', border: '2px solid #e0e0e0' },
   rank: { fontSize: '24px', fontWeight: '700', color: '#4F46E5', minWidth: '50px' },
   playerInfo: { flex: 1 },
-  playerScore: { fontSize: '18px', fontWeight: '700', color: '#1a1a1a', marginBottom: '4px' },
+  playerNameRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' },
+  playerName: { fontSize: '16px', fontWeight: '700', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  playerScore: { fontSize: '16px', fontWeight: '700', color: '#4F46E5', flexShrink: 0 },
   playerStats: { fontSize: '13px', color: '#666' },
   finishedTitle: { fontSize: '32px', fontWeight: '700', color: '#1a1a1a', marginBottom: '20px', textAlign: 'center' },
+  // ✅ NEW (Phase 2): Class Highlights / awards card
+  awardsCard: { backgroundColor: '#F5F3FF', border: '2px solid #DDD6FE', borderRadius: '14px', padding: '18px', marginBottom: '20px' },
+  awardsTitle: { fontSize: '15px', fontWeight: '700', color: '#4F46E5', marginBottom: '12px', textAlign: 'center' },
+  awardsList: { display: 'flex', flexDirection: 'column', gap: '8px' },
+  awardItem: { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderRadius: '10px' },
+  awardIcon: { fontSize: '22px', flexShrink: 0 },
+  awardInfo: { flex: 1, minWidth: 0 },
+  awardLabel: { fontSize: '12px', fontWeight: '700', color: '#6B7280', textTransform: 'uppercase', letterSpacing: '0.3px' },
+  awardWinner: { fontSize: '14px', fontWeight: '600', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   tabs: { display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #e0e0e0', paddingBottom: '10px' },
   tab: { flex: 1, padding: '12px', fontSize: '15px', fontWeight: '600', backgroundColor: '#f0f0f0', color: '#666', border: 'none', borderRadius: '8px 8px 0 0', cursor: 'pointer', transition: 'all 0.2s' },
   tabActive: { backgroundColor: '#4F46E5', color: 'white' },
@@ -788,6 +998,24 @@ const styles = {
   myRankCard: { padding: '20px', backgroundColor: '#FFF9C4', borderRadius: '12px', marginBottom: '20px', textAlign: 'center', border: '2px solid #FDD835' },
   myRankText: { fontSize: '18px', fontWeight: '600', color: '#1a1a1a', marginBottom: '8px' },
   myScoreText: { fontSize: '24px', fontWeight: '700', color: '#4F46E5' },
+  // ✅ NEW (Phase 3): team leaderboard
+  myTeamRankText: { fontSize: '14px', fontWeight: '600', color: '#6B7280', marginTop: '8px' },
+  teamLbList: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' },
+  teamLbCard: { border: '2px solid #e0e0e0', borderRadius: '12px', overflow: 'hidden' },
+  teamLbHeader: { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', backgroundColor: '#F9FAFB' },
+  teamLbRank: { fontSize: '18px', fontWeight: '700', color: '#4F46E5', minWidth: '32px' },
+  teamLbIcon: { fontSize: '18px' },
+  teamLbName: { flex: 1, fontSize: '15px', fontWeight: '700', color: '#1a1a1a' },
+  teamLbScore: { fontSize: '15px', fontWeight: '700', color: '#10B981' },
+  teamLbMembers: { padding: '8px 16px 12px 58px', display: 'flex', flexDirection: 'column', gap: '4px' },
+  teamLbMemberRow: { display: 'flex', justifyContent: 'space-between', fontSize: '13px' },
+  teamLbMemberName: { color: '#374151' },
+  teamLbMemberScore: { color: '#6B7280' },
+  // ✅ NEW (Phase 5.3): live momentum bar
+  momentumBar: { display: 'flex', width: '100%', height: '28px', borderRadius: '14px', overflow: 'hidden', marginBottom: '16px', backgroundColor: '#e0e0e0' },
+  momentumSegment: { display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'width 0.6s ease', minWidth: '2%' },
+  momentumLabel: { fontSize: '12px', fontWeight: '700', color: 'white', whiteSpace: 'nowrap', textShadow: '0 1px 2px rgba(0,0,0,0.3)' },
+  questionMvpBanner: { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', borderRadius: '10px', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', marginBottom: '16px', fontSize: '14px', fontWeight: '600', color: '#92400E' },
   reviewSummary: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' },
   summaryCard: { padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '10px', textAlign: 'center', border: '2px solid #e0e0e0' },
   summaryLabel: { fontSize: '12px', fontWeight: '600', color: '#666', marginBottom: '8px' },
