@@ -297,7 +297,9 @@ quizSessionSchema.statics.findActiveSession = function(groupId) {
   return this.findOne({
     group: groupId,
     status: { $in: ['waiting', 'active', 'paused'] }
-  }).populate('quiz').populate('host', 'name username');
+  }).populate('quiz').populate('host', 'name username')
+    // ✅ NEW: lets the Lobby show a quick-quiz classroom's PIN+QR without a second fetch
+    .populate('group', 'pin qrCode isQuickQuiz groupName');
 };
 
 // ========================================

@@ -16,4 +16,8 @@ const socket = io(SOCKET_URL, {
   timeout: 20000,
 });
 
+socket.on('connect', () => console.log('🔌 socket connected:', socket.id));
+socket.on('disconnect', (reason) => console.log('🔌 socket disconnected, reason:', reason));
+socket.on('connect_error', (err) => console.log('🔌 socket connect_error:', err.message));
+
 export default socket;

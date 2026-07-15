@@ -70,8 +70,17 @@ const groupSchema = new mongoose.Schema({
     type: String,
     lowercase: true,
     trim: true
-  }]
-  
+  }],
+
+  // ✅ NEW: an auto-created, chat-less classroom created behind the scenes when a
+  // teacher uses "Create New Quiz" with no classroom already open. Hidden from the
+  // teacher's own "My Classes" list (see /my-groups); still visible to students who
+  // join it, since that IS their session.
+  isQuickQuiz: {
+    type: Boolean,
+    default: false
+  }
+
 }, {
   timestamps: true
 });

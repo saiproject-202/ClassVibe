@@ -27,6 +27,8 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
   const [quizHistory, setQuizHistory] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [selectedHistory, setSelectedHistory] = useState(null);
+  // ✅ NEW: drill-down into one student's per-question review from the history detail view
+  const [reviewParticipant, setReviewParticipant] = useState(null);
 
   const token = localStorage.getItem('token');
 
@@ -338,7 +340,6 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
             }}>
               <div style={S.statusDot(quizStatus)} />
               <span style={S.statusText}>
-                {quizStatus === 'waiting' && 'Waiting for students to join'}
                 {quizStatus === 'active' && `Live — Question ${currentQuestionIndex + 1} of ${quiz?.questions?.length || '?'}`}
                 {quizStatus === 'finished' && 'Quiz finished'}
               </span>
@@ -360,11 +361,11 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
               ))}
             </div>
 
-            {/* ── Waiting students ─────────────────────────────── */}
-            {(quizStatus === 'waiting' || quizStatus === 'active') && (
+            {/* ── Live roster ───────────────────────────────────── */}
+            {quizStatus === 'active' && (
               <div style={S.section}>
                 <h3 style={S.sectionTitle}>
-                  👥 Waiting: {waitingStudents.length} | Active: {participants.length}
+                  👥 Students ({participants.length})
                 </h3>
                 {totalParticipants === 0 ? (
                   <div style={S.emptyBox}>
@@ -503,10 +504,58 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
                 <p style={{ fontSize: 15, fontWeight: 600, color: '#333', marginBottom: 6 }}>No quiz history yet</p>
                 <p style={{ fontSize: 13, color: '#888' }}>Completed quizzes will appear here</p>
               </div>
+            ) : selectedHistory && reviewParticipant ? (
+              // ── Per-student review (like QuizPlayer's "My Review" tab) ──────
+              <div>
+                <button onClick={() => setReviewParticipant(null)} style={S.backBtn}>← Back to leaderboard</button>
+
+                <div style={S.histDetailHeader}>
+                  <h3 style={S.histDetailTitle}>{reviewParticipant.user?.name || reviewParticipant.name || 'Student'}</h3>
+                  <div style={S.histDetailMeta}>
+                    <span>🏆 {reviewParticipant.score} pts</span>
+                    <span>
+                      {reviewParticipant.answers?.filter(a => a.isCorrect).length || 0}/
+                      {selectedHistory.quiz?.questions?.length || 0} correct
+                    </span>
+                  </div>
+                </div>
+
+                <div style={S.questionsList}>
+                  {(selectedHistory.quiz?.questions || []).map((q, i) => {
+                    const answer = reviewParticipant.answers?.find(a => a.questionIndex === i);
+                    if (!answer) {
+                      return (
+                        <div key={i} style={{ ...S.answerCard, opacity: 0.6 }}>
+                          <div style={S.answerHeader}>
+                            <div style={S.questionItemNum}>Q{i + 1}</div>
+                            <div style={{ ...S.answerResult, color: '#9CA3AF' }}>❓ Not answered</div>
+                            <div style={S.questionPts}>+0 pts</div>
+                          </div>
+                          <p style={S.answerQuestionText}>{q.questionText}</p>
+                        </div>
+                      );
+                    }
+                    const isUnanswered = answer.selectedAnswer === null || answer.selectedAnswer === undefined || answer.selectedAnswer === -1;
+                    return (
+                      <div key={i} style={S.answerCard}>
+                        <div style={S.answerHeader}>
+                          <div style={S.questionItemNum}>Q{i + 1}</div>
+                          <div style={{ ...S.answerResult, color: answer.isCorrect ? '#25D366' : (isUnanswered ? '#9CA3AF' : '#EF4444') }}>
+                            {answer.isCorrect ? '✅ Correct' : (isUnanswered ? '❓ Not Answered' : '❌ Wrong')}
+                          </div>
+                          <div style={S.questionPts}>+{answer.points || 0} pts</div>
+                        </div>
+                        <p style={S.answerQuestionText}>{q.questionText}</p>
+                        {q.explanation && <p style={S.answerExplanation}>💡 {q.explanation}</p>}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             ) : selectedHistory ? (
               // ── History detail ──────────────────────────────────
               <div>
-                <button onClick={() => setSelectedHistory(null)} style={S.backBtn}>← Back to list</button>
+                <button onClick={() => { setSelectedHistory(null); setReviewParticipant(null); }} style={S.backBtn}>← Back to list</button>
 
                 <div style={S.histDetailHeader}>
                   <h3 style={S.histDetailTitle}>{selectedHistory.quiz?.title || 'Quiz'}</h3>
@@ -540,7 +589,7 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
                     {[...selectedHistory.participants]
                       .sort((a, b) => b.score - a.score)
                       .map((p, i) => (
-                        <div key={i} style={S.lbRow}>
+                        <div key={i} style={{ ...S.lbRow, cursor: 'pointer' }} onClick={() => setReviewParticipant(p)}>
                           <div style={S.lbRank}>
                             {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
                           </div>
@@ -550,6 +599,7 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
                             {p.answers?.filter(a => a.isCorrect).length || 0}/
                             {p.answers?.length || 0} ✓
                           </div>
+                          <div style={{ fontSize: 18, color: '#ccc' }}>›</div>
                         </div>
                       ))}
                   </div>
@@ -830,6 +880,13 @@ const S = {
     fontSize: 11, fontWeight: 600, textTransform: 'capitalize'
   },
   questionPts: { fontSize: 11, fontWeight: 600, color: '#25D366' },
+
+  // ✅ NEW: per-student review cards (history drill-down)
+  answerCard: { padding: 12, backgroundColor: '#f8f9fa', borderRadius: 8, border: '1px solid #eee' },
+  answerHeader: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 },
+  answerResult: { flex: 1, fontSize: 13, fontWeight: 700 },
+  answerQuestionText: { margin: 0, fontSize: 14, color: '#333' },
+  answerExplanation: { margin: '8px 0 0', fontSize: 12, color: '#666', fontStyle: 'italic' },
 
   // History
   histCard: {

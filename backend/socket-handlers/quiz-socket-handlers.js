@@ -238,7 +238,7 @@ function setupQuizSocketHandlers(io, socket) {
       const { sessionId } = data;
       console.log(`👤 Student ${socket.userId} joining quiz ${sessionId}`);
 
-      const session = await QuizSession.findById(sessionId).populate('quiz');
+      let session = await QuizSession.findById(sessionId).populate('quiz');
       if (!session) {
         return socket.emit('error', { message: 'Session not found' });
       }
@@ -278,29 +278,49 @@ function setupQuizSocketHandlers(io, socket) {
       );
 
       if (!participant) {
-        session.participants.push({
-          user:     socket.userId,
-          name:     userName, // ✅ NEW — captured once here, reused by getLeaderboard() so
-                               // leaderboards can show real names instead of just points
-          joinedAt: new Date(),
-          answers:  [],
-          score:    0,
-          streak:   0
-        });
-        participant = session.participants[session.participants.length - 1];
+        // ✅ FIX: this used to be a read-modify-write (push onto the in-memory array,
+        // then .save()) — two 'student:joinQuiz' emits arriving close together (React
+        // StrictMode's double-effect in dev, a reconnect, or the Lobby-then-QuizPlayer
+        // double-join on hand-off) could both read the session before either saved,
+        // each push their own copy, and the later .save() clobber the earlier one —
+        // producing duplicate participant rows for the same user. The filter below
+        // ('participants.user' $ne this user) makes the push atomic and conditional at
+        // the database level, so only the first of any concurrent joins actually adds one.
+        const pushResult = await QuizSession.findOneAndUpdate(
+          { _id: sessionId, 'participants.user': { $ne: socket.userId } },
+          { $push: { participants: {
+              user:     socket.userId,
+              name:     userName, // ✅ NEW — captured once here, reused by getLeaderboard() so
+                                   // leaderboards can show real names instead of just points
+              joinedAt: new Date(),
+              answers:  [],
+              score:    0,
+              streak:   0
+          } } },
+          { new: true }
+        ).populate('quiz');
 
-        // ✅ NEW (Phase 3/4): auto-assign a team immediately on join in two cases:
-        // (1) a genuinely late joiner (quiz already active) who missed the lobby's
-        //     team-selection step entirely, or
-        // (2) this session doesn't let students pick their own team at all — e.g.
-        //     Random Teams mode (Phase 4), where the teacher only sets a team count and
-        //     the system distributes everyone automatically as they arrive in the lobby.
-        const noStudentChoice = session.sessionSettings?.allowStudentChoice === false;
-        if (session.teams && session.teams.length > 0 && (session.status !== 'waiting' || noStudentChoice)) {
-          assignToSmallestTeam(session, participant);
+        // If pushResult is null, someone else's concurrent join already added this
+        // participant first — re-fetch to get the current (already-added) state.
+        session = pushResult || await QuizSession.findById(sessionId).populate('quiz');
+        participant = session.participants.find(
+          p => p.user.toString() === socket.userId.toString()
+        );
+
+        // ✅ CHANGED (Phase 6 — Lobby): only auto-assign when this session doesn't let
+        // students pick their own team at all (e.g. Random Teams mode). Late joiners in
+        // a choice-allowed team quiz used to be silently auto-assigned here too — now
+        // they're left unassigned and the Lobby shows them the team picker instead,
+        // same as a pre-start joiner would see. Only the request that actually performed
+        // the push (pushResult truthy) does the assignment, so a losing concurrent join
+        // doesn't double-assign.
+        if (pushResult && participant && !participant.teamId) {
+          const noStudentChoice = session.sessionSettings?.allowStudentChoice === false;
+          if (session.teams && session.teams.length > 0 && noStudentChoice) {
+            assignToSmallestTeam(session, participant);
+            await session.save();
+          }
         }
-
-        await session.save();
 
         if (participant.teamId) {
           const teamRosterCounts = {};
@@ -340,7 +360,13 @@ function setupQuizSocketHandlers(io, socket) {
         // ✅ NEW (Phase 3): team context — empty array + null in individual mode
         teams:              session.teams || [],
         myTeamId:           participant.teamId || null,
-        allowStudentChoice: session.sessionSettings?.allowStudentChoice !== false
+        allowStudentChoice: session.sessionSettings?.allowStudentChoice !== false,
+        // ✅ NEW (Phase 6 — Lobby): existing roster snapshot, so a freshly-joining
+        // student can immediately see who's already here instead of only learning about
+        // people who join AFTER them via the live 'student:joined' broadcast.
+        participants: session.participants.map(p => ({
+          userId: p.user, name: p.name || 'Student', teamId: p.teamId || null
+        }))
       });
 
       // ✅ CHANGED: emit 'student:joined' with real name (was 'participantJoined' without name)
@@ -395,8 +421,8 @@ function setupQuizSocketHandlers(io, socket) {
       const session = await QuizSession.findById(sessionId);
       if (!session) return socket.emit('error', { message: 'Session not found' });
 
-      if (session.status !== 'waiting') {
-        return socket.emit('error', { message: 'Teams are locked — the quiz has already started.' });
+      if (session.status === 'completed') {
+        return socket.emit('error', { message: 'This quiz has already ended.' });
       }
 
       if (!session.teams || session.teams.length === 0) {
@@ -411,6 +437,15 @@ function setupQuizSocketHandlers(io, socket) {
       );
       if (!participant) {
         return socket.emit('error', { message: 'Join the quiz before picking a team.' });
+      }
+
+      // ✅ CHANGED: teams used to lock the moment status left 'waiting', which meant a
+      // late joiner (quiz already active) could never pick a team at all — they'd get
+      // silently auto-assigned instead. Now the lock only applies once THIS student
+      // already has a team; a late joiner's first pick is still allowed, they just
+      // can't switch teams after the quiz has started.
+      if (session.status !== 'waiting' && participant.teamId) {
+        return socket.emit('error', { message: 'Teams are locked — you already have a team for this quiz.' });
       }
 
       // Auto-balance: a student may only join whichever team currently has the fewest
@@ -509,19 +544,38 @@ function setupQuizSocketHandlers(io, socket) {
         if (!alreadyAnswered) {
           let currentStreak = session.participants[participantIndex].streak || 0;
           currentStreak     = isCorrect ? currentStreak + 1 : 0;
+
+          // ✅ FIX: this used to mutate the in-memory participants array and .save() the
+          // whole document — racing with handleQuestionComplete's own full-document save
+          // when the timer expires at almost the same instant this answer arrives
+          // (Mongoose VersionError, and worse, a silent lost-update since whichever save
+          // landed second would overwrite the other's changes to the same array). Now an
+          // atomic, conditional per-participant update: it only applies if this student
+          // hasn't already got an entry for this question, so it can't collide with
+          // handleQuestionComplete's own atomic "mark unanswered" write for anyone else.
+          const updateResult = await QuizSession.updateOne(
+            {
+              _id: sessionId,
+              'participants.user': socket.userId,
+              'participants.answers.questionIndex': { $ne: questionIndex }
+            },
+            {
+              $push: { 'participants.$.answers': { questionIndex, selectedAnswer, isCorrect, points, timeTaken, answeredAt: new Date() } },
+              $inc:  { 'participants.$.score': points },
+              $set:  { 'participants.$.streak': currentStreak }
+            }
+          );
+
+          // Someone else (e.g. the timer's own auto-fill) already recorded an entry for
+          // this question in the moment between our read and this write — nothing more to do.
+          if (updateResult.modifiedCount === 0) return;
+
+          // Keep the in-memory copy consistent for the rest of this handler (momentum calc below)
           session.participants[participantIndex].streak = currentStreak;
-
           session.participants[participantIndex].answers.push({
-            questionIndex,
-            selectedAnswer,
-            isCorrect,
-            points,
-            timeTaken,
-            answeredAt: new Date()
+            questionIndex, selectedAnswer, isCorrect, points, timeTaken, answeredAt: new Date()
           });
-
           session.participants[participantIndex].score += points;
-          await session.save();
 
           // ✅ CHANGED: no longer reveals correct/wrong the instant this student submits.
           // Everyone (answered or not) now finds out together when the timer ends —
@@ -622,29 +676,48 @@ async function handleQuestionComplete(io, session, questionIndex) {
   const sessionId = session._id.toString();
 
   try {
-    const updatedSession = await QuizSession.findById(sessionId).populate('quiz');
+    let updatedSession = await QuizSession.findById(sessionId).populate('quiz');
     const question       = updatedSession.quiz.questions[questionIndex];
 
     const participantsWhoAnswered = updatedSession.participants.filter(
       p => p.answers.some(a => a.questionIndex === questionIndex)
     );
 
-    for (let participant of updatedSession.participants) {
-      const hasAnswered = participant.answers.some(a => a.questionIndex === questionIndex);
-      if (!hasAnswered) {
-        participant.answers.push({
-          questionIndex,
-          selectedAnswer: null,
-          isCorrect:      false,
-          points:         0,
-          timeTaken:      question.timeLimit || 45,
-          answeredAt:     new Date()
-        });
-        participant.streak = 0;
-      }
+    // ✅ FIX: this used to mutate updatedSession's in-memory participants array and
+    // .save() the whole document — racing with student:submitAnswer's own full-document
+    // save when an answer lands right as the timer expires (Mongoose VersionError, and
+    // worse, a silent lost-update where whichever save landed second could wipe out the
+    // other's write to the same participants array). Now each "mark unanswered" write is
+    // an atomic, conditional per-participant update — it only applies if that student
+    // still hasn't answered this question by the time it runs, so it can never collide
+    // with a real answer that was just recorded.
+    const unanswered = updatedSession.participants.filter(
+      p => !p.answers.some(a => a.questionIndex === questionIndex)
+    );
+    for (const participant of unanswered) {
+      await QuizSession.updateOne(
+        {
+          _id: sessionId,
+          'participants.user': participant.user,
+          'participants.answers.questionIndex': { $ne: questionIndex }
+        },
+        {
+          $push: { 'participants.$.answers': {
+            questionIndex,
+            selectedAnswer: null,
+            isCorrect:      false,
+            points:         0,
+            timeTaken:      question.timeLimit || 45,
+            answeredAt:     new Date()
+          } },
+          $set: { 'participants.$.streak': 0 }
+        }
+      );
     }
 
-    await updatedSession.save();
+    // Re-fetch so every read below (and the further saves later in this function) sees
+    // a fully consistent, up-to-date document.
+    updatedSession = await QuizSession.findById(sessionId).populate('quiz');
 
     // ✅ NEW: reveal correct/wrong to EVERY participant at the same moment — when the
     // timer ends — instead of the old behavior where each student found out the

@@ -6,7 +6,7 @@
 // 4. All socket events, quiz features, student dashboard — IDENTICAL to previous version
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { getMyGroups, getGroupDetails, getMessages, endSession, startScheduledSession, cancelScheduledSession, pingBackend } from './api';
+import { getMyGroups, getGroupDetails, getMessages, endSession, startScheduledSession, cancelScheduledSession, pingBackend, createQuickQuizGroup } from './api';
 import socket from './socket';
 import Home from './pages/Home';
 import Login from './components/Login';
@@ -21,8 +21,8 @@ import FloatingQuizButton from './components/FloatingQuizButton';
 import QuizCreator from './components/QuizCreator';
 import StudentAnalytics from './components/StudentAnalytics';
 import './App.css';
-import QuizHost from './components/QuizHost';
-import QuizWaitingRoom from './components/QuizWaitingRoom';
+import QuizLobby from './components/QuizLobby';
+import QuizControlPanel from './components/QuizControlPanel';
 import QuizPlayer from './components/QuizPlayer';
 // eslint-disable-next-line no-unused-vars
 import Footer from './components/Footer';
@@ -321,9 +321,17 @@ function App() {
   }, []);
 
   const [showQuizCreator, setShowQuizCreator] = useState(false);
+  // ✅ NEW: the hidden classroom auto-created for "Create New Quiz" when no classroom is
+  // open — kept separate from currentGroup so the chat/classroom shell never renders.
+  const [pendingQuizGroupId, setPendingQuizGroupId] = useState(null);
+  const [quickQuizLoading, setQuickQuizLoading] = useState(false);
   const [showAnalytics, setShowAnalytics] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
   const [activeQuizSession, setActiveQuizSession] = useState(null);
+  // ✅ NEW (Lobby): tracks whether the current activeQuizSession has passed through the
+  // Lobby and should now render the live view (QuizControlPanel for teacher, QuizPlayer
+  // for student) instead of the Lobby itself.
+  const [lobbyCleared, setLobbyCleared] = useState(false);
 
   const [showWaitingRoom, setShowWaitingRoom] = useState(false);
   const [quizSessionId, setQuizSessionId] = useState(null);
@@ -393,7 +401,11 @@ function App() {
   // IDENTICAL to previous
   useEffect(() => {
     const openWaitingRoom = (e) => { setQuizSessionId(e.detail.sessionId); setShowWaitingRoom(true); };
-    const startQuiz = () => { setShowWaitingRoom(false); setShowQuizPlayer(true); };
+    // ✅ CHANGED: this used to fire the instant a quiz started, regardless of whether a
+    // team-mode student had picked a team yet. Now unused by QuizLobby (it hands off via
+    // its own onEnterLive callback) — kept only so any other lingering dispatcher of the
+    // legacy 'startQuiz' window event doesn't throw.
+    const startQuiz = () => {};
     // Notification "Join Now" — enters the classroom directly
     const joinSession = (e) => {
       const groupId = e.detail?.groupId;
@@ -572,7 +584,7 @@ function App() {
     localStorage.removeItem('token'); localStorage.removeItem('user');
     // Reset all overlay state so a subsequent login doesn't inherit stale flags
     setShowAnalytics(false); setShowSchedule(false); setShowQuizCreator(false);
-    setActiveQuizSession(null); setShowWaitingRoom(false); setShowQuizPlayer(false);
+    setActiveQuizSession(null); setLobbyCleared(false); setShowWaitingRoom(false); setShowQuizPlayer(false);
     setUser(null); setIsAuthenticated(false); setGroups([]); setCurrentGroup(null); setMessages([]); setAuthScreen('home');
   };
 
@@ -743,6 +755,26 @@ function App() {
       await loadGroups(false);
       if (data.group) selectGroup(data.group._id ?? data.group.id);
     } catch (err) { alert('Failed to create session: ' + err.message); }
+  };
+
+  // ✅ NEW: "Create New Quiz" quick tool. If a classroom is already open, behaves exactly
+  // as before (quiz attaches to it). If not, silently creates a hidden, chat-less
+  // classroom behind the scenes just to hold this one quiz — no prompt, no chat page,
+  // currentGroup is deliberately left untouched so nothing else in the app renders it.
+  const handleOpenQuizCreator = async () => {
+    if (currentGroup?._id) { setShowQuizCreator(true); return; }
+    setQuickQuizLoading(true);
+    try {
+      const data = await createQuickQuizGroup();
+      if (data.group) {
+        setPendingQuizGroupId(data.group.id);
+        setShowQuizCreator(true);
+      }
+    } catch (err) {
+      alert('Failed to start quiz: ' + (err.response?.data?.error || err.message));
+    } finally {
+      setQuickQuizLoading(false);
+    }
   };
 
   const loadStudentQuizzes = useCallback(async () => {
@@ -981,8 +1013,13 @@ function App() {
       />
 
       {showQuizCreator && (
-        <QuizCreator groupId={currentGroup?._id} onClose={() => setShowQuizCreator(false)}
-          onSuccess={(session) => { setShowQuizCreator(false); if (session) setActiveQuizSession(session); else alert('✅ Quiz created successfully!'); }} />
+        <QuizCreator groupId={pendingQuizGroupId || currentGroup?._id} onClose={() => { setShowQuizCreator(false); setPendingQuizGroupId(null); }}
+          onSuccess={(session) => {
+            setShowQuizCreator(false);
+            setPendingQuizGroupId(null);
+            if (session) { setLobbyCleared(false); setActiveQuizSession(session); }
+            else alert('✅ Quiz created successfully!');
+          }} />
       )}
       {showAnalytics && <StudentAnalytics groupId={currentGroup?._id} onClose={() => setShowAnalytics(false)} />}
       {showSchedule && (
@@ -990,20 +1027,41 @@ function App() {
       )}
       {currentGroup && currentGroup.isActive && (
         <FloatingQuizButton groupId={currentGroup._id} isTeacher={user?.role === 'teacher'}
-          onCreateQuiz={(session) => session ? setActiveQuizSession(session) : setShowQuizCreator(true)}
-          onJoinQuiz={(session) => setActiveQuizSession(session)} socket={socket} />
+          onCreateQuiz={(session) => { if (session) { setLobbyCleared(false); setActiveQuizSession(session); } else { setShowQuizCreator(true); } }}
+          // ✅ NEW: teacher reopening an existing session — skip the Lobby if it's already live
+          onOpenLobby={(session) => { setLobbyCleared(session?.status === 'active'); setActiveQuizSession(session); }}
+          onJoinQuiz={(session) => { setLobbyCleared(false); setActiveQuizSession(session); }} socket={socket} />
       )}
-      {activeQuizSession && user?.role === 'teacher' && (
-        <QuizHost quiz={activeQuizSession.quiz} sessionId={activeQuizSession._id} onClose={() => setActiveQuizSession(null)} socket={socket} />
+
+      {/* ══ Lobby → live view hand-off (both roles go through the Lobby first) ══ */}
+      {/* ✅ NEW: falls back to the quiz's own group when no classroom is open (the
+          "Create New Quiz" quick-quiz path never sets currentGroup) */}
+      {activeQuizSession && user?.role === 'teacher' && !lobbyCleared && (
+        <QuizLobby role="teacher" groupId={currentGroup?._id || activeQuizSession?.quiz?.group} sessionId={activeQuizSession._id}
+          onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
+          onEnterLive={() => setLobbyCleared(true)} />
       )}
-      {activeQuizSession && user?.role === 'student' && activeQuizSession.status === 'waiting' && (
-        <QuizWaitingRoom session={activeQuizSession} onClose={() => setActiveQuizSession(null)} socket={socket} />
+      {activeQuizSession && user?.role === 'teacher' && lobbyCleared && (
+        <QuizControlPanel groupId={currentGroup?._id || activeQuizSession?.quiz?.group}
+          onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
+          onStartQuiz={() => { setActiveQuizSession(null); setLobbyCleared(false); handleOpenQuizCreator(); }} />
       )}
-      {showWaitingRoom && <QuizWaitingRoom session={{ _id: quizSessionId }} socket={socket} onClose={() => setShowWaitingRoom(false)} />}
+      {activeQuizSession && user?.role === 'student' && !lobbyCleared && (
+        <QuizLobby role="student" sessionId={activeQuizSession._id}
+          onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
+          onEnterLive={() => setLobbyCleared(true)} />
+      )}
+      {activeQuizSession && user?.role === 'student' && lobbyCleared && (
+        <QuizPlayer sessionId={activeQuizSession._id} onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }} />
+      )}
+
+      {/* Notification "Join Now" path — same Lobby, separate state (no full session object available) */}
+      {showWaitingRoom && (
+        <QuizLobby role="student" sessionId={quizSessionId}
+          onClose={() => setShowWaitingRoom(false)}
+          onEnterLive={() => { setShowWaitingRoom(false); setShowQuizPlayer(true); }} />
+      )}
       {showQuizPlayer && <QuizPlayer sessionId={quizSessionId} onClose={() => setShowQuizPlayer(false)} />}
-      {activeQuizSession && user?.role === 'student' && activeQuizSession.status === 'active' && (
-        <QuizPlayer sessionId={activeQuizSession._id} onClose={() => setActiveQuizSession(null)} />
-      )}
 
       {/* ══════════════════════════════════════
           ✅ NEW: MANAGE SESSION MODAL
@@ -1390,9 +1448,9 @@ function App() {
                   {/* Quick tools + activity */}
                   <div style={D.rightCol}>
                     <h3 style={D.rightTitle}>Quick Resource Tools</h3>
-                    <div style={D.toolCard} onClick={() => setShowQuizCreator(true)}>
+                    <div style={D.toolCard} onClick={quickQuizLoading ? undefined : handleOpenQuizCreator}>
                       <span style={D.toolIconBox}>📝</span>
-                      <div style={D.toolInfo}><div style={D.toolName}>Create New Quiz</div><div style={D.toolDesc}>Build questions & assign to classes</div></div>
+                      <div style={D.toolInfo}><div style={D.toolName}>Create New Quiz</div><div style={D.toolDesc}>{quickQuizLoading ? 'Starting...' : 'Build questions & assign to classes'}</div></div>
                       <span style={D.toolArrow}>↗</span>
                     </div>
                     <div style={D.toolCard} onClick={() => setShowSchedule(true)}>

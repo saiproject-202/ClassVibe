@@ -13,6 +13,7 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const { generator } = require('../services/aiQuizGenerator');
 const jwt = require('jsonwebtoken');
+const QRCode = require('qrcode');
 
 // ========================================
 // FILE UPLOAD SETUP
@@ -526,13 +527,64 @@ router.get('/group/:groupId/history', authenticateToken, async (req, res) => {
       participants: s.participants || [],
       averageScore: s.averageScore ?? null,
       createdAt:    s.createdAt,
+      startedAt:    s.startedAt,
+      endedAt:      s.completedAt,
       questions:    s.quiz?.questions || [],
     }));
 
-    res.json({ quizzes });
+    // ✅ FIX: frontend (QuizControlPanel history tab) reads data.history — this
+    // endpoint only ever sent data.quizzes, so the tab silently showed
+    // "No quiz history yet" even when sessions existed.
+    res.json({ quizzes, history: quizzes });
   } catch (error) {
     console.error('Get quiz history error:', error);
     res.status(500).json({ error: 'Failed to fetch quiz history' });
+  }
+});
+
+// ========================================
+// "Create New Quiz" with no classroom open — auto-creates a lightweight, chat-less
+// classroom behind the scenes purely to hold this one quiz, with its own PIN+QR so
+// students can join directly from the Lobby. Teacher never sees this as a classroom —
+// no chat page is shown for it, and it's hidden from their own "My Classes" list
+// (see the isQuickQuiz filter in GET /api/groups/my-groups).
+// ========================================
+router.post('/quick/create-group', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (user.role !== 'teacher') {
+      return res.status(403).json({ error: 'Only teachers can create a quiz this way' });
+    }
+
+    let pin;
+    let pinExists = true;
+    while (pinExists) {
+      pin = Math.floor(100000 + Math.random() * 900000).toString();
+      pinExists = await Group.findOne({ pin });
+    }
+
+    const joinUrl = `${process.env.FRONTEND_URL}?pin=${pin}`;
+    const qrCode = await QRCode.toDataURL(joinUrl);
+
+    const group = new Group({
+      groupName:   'Quick Quiz',
+      admin:       req.userId,
+      members:     [{ user: req.userId, joinedAt: new Date() }],
+      pin,
+      qrCode,
+      isQuickQuiz: true
+    });
+    await group.save();
+
+    console.log('📝 Quick-quiz classroom created:', { groupId: group._id, pin });
+
+    res.status(201).json({
+      group: { id: group._id, groupName: group.groupName, pin: group.pin, qrCode: group.qrCode }
+    });
+  } catch (error) {
+    console.error('Create quick-quiz group error:', error);
+    res.status(500).json({ error: 'Failed to create quiz' });
   }
 });
 

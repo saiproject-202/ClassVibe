@@ -853,7 +853,15 @@ app.post('/api/groups/join', optionalAuth, async (req, res) => {
 app.get('/api/groups/my-groups', authenticateToken, async (req, res) => {
   try {
     const groups = await Group.find({
-      'members.user': req.userId
+      'members.user': req.userId,
+      // ✅ NEW: a "quick quiz" classroom (auto-created by "Create New Quiz" with no
+      // classroom open) is hidden from the TEACHER who created it (admin) so it doesn't
+      // clutter "My Classes" — but a student who joined it still needs to find their
+      // session here, so it stays visible to everyone else.
+      $or: [
+        { isQuickQuiz: { $ne: true } },
+        { isQuickQuiz: true, admin: { $ne: req.userId } }
+      ]
     })
     .populate('admin', 'username name')
     .populate('members.user', 'username name isOnline')

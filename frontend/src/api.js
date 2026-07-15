@@ -1,7 +1,11 @@
 // frontend/src/api.js
 import axios from 'axios';
 
-const API_URL = 'https://classvibe-backend.onrender.com';
+// ✅ FIX: was hardcoded, so a local .env.local REACT_APP_API_URL override (used
+// throughout the quiz components for local dev) was silently ignored here — every
+// call through this file always hit production regardless. No-op in the real deployed
+// build, where REACT_APP_API_URL is unset and the same fallback applies either way.
+const API_URL = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
@@ -112,6 +116,17 @@ export const createGroup = async (groupName) => {
     return response.data;
   } catch (error) {
     console.error('Create group API error:', error);
+    throw error;
+  }
+};
+
+// ✅ NEW: backing classroom auto-created for "Create New Quiz" when no classroom is open
+export const createQuickQuizGroup = async () => {
+  try {
+    const response = await api.post('/quiz/quick/create-group');
+    return response.data;
+  } catch (error) {
+    console.error('Create quick-quiz group API error:', error);
     throw error;
   }
 };

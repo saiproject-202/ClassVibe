@@ -1,10 +1,9 @@
 // frontend/src/components/FloatingQuizButton.jsx
 // Draggable floating quiz button
-// Teacher: opens QuizControlPanel (create / control)
-// Student: joins active quiz (waiting room / player)
+// Teacher: opens the Lobby (or straight to QuizControlPanel if already live)
+// Student: opens the Lobby (team pick if needed, then the live quiz)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import QuizControlPanel from './QuizControlPanel';
 
 const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
 
@@ -12,15 +11,13 @@ const FloatingQuizButton = ({
   groupId,
   isTeacher,
   onCreateQuiz,   // called when teacher wants to build a new quiz
-  onJoinQuiz,     // called with sessionId when student joins
+  onOpenLobby,    // called with the full session object when teacher reopens an existing one
+  onJoinQuiz,     // called with the full session object when student joins
   socket
 }) => {
   // ── Quiz session state ────────────────────────────────────────────
   const [quizSession, setQuizSession] = useState(null);
   const [pulse, setPulse] = useState(false);
-
-  // ── Control-panel visibility (teacher) ───────────────────────────
-  const [showControlPanel, setShowControlPanel] = useState(false);
 
   // ── Draggable state ───────────────────────────────────────────────
   // Start position: bottom-right corner
@@ -81,7 +78,6 @@ const FloatingQuizButton = ({
 
     const onQuizEnded = () => {
       setQuizSession(null);
-      setShowControlPanel(false);
     };
 
     const onParticipantJoined = (data) => {
@@ -176,10 +172,15 @@ const FloatingQuizButton = ({
   const onTouchEnd = () => { dragging.current = false; };
 
   // ── Student join helper (declared BEFORE handleClick) ─────────────
-  const handleStudentJoin = useCallback((sessionId) => {
+  // ✅ FIXED: used to pass just the sessionId string up to onJoinQuiz, which App.js
+  // stored directly as activeQuizSession — so activeQuizSession._id and .status were
+  // both undefined and nothing ever rendered. Now passes the full session object.
+  const handleStudentJoin = useCallback((session) => {
     if (!socket) return;
-    socket.emit('student:joinQuiz', { sessionId });
-    if (onJoinQuiz) onJoinQuiz(sessionId);
+    const sid = session?._id || session?.sessionId;
+    if (!sid) return;
+    socket.emit('student:joinQuiz', { sessionId: sid });
+    if (onJoinQuiz) onJoinQuiz(session);
   }, [socket, onJoinQuiz]);
 
   // ── Click handler ─────────────────────────────────────────────────
@@ -188,16 +189,17 @@ const FloatingQuizButton = ({
     if (moved.current) return;
 
     if (isTeacher) {
-      // Teacher: open control panel if quiz exists, else open quiz builder
+      // Teacher: open the Lobby (or straight to live control if already active) if a
+      // quiz exists, else open the quiz builder
       if (quizSession) {
-        setShowControlPanel(true);
+        onOpenLobby?.(quizSession);
       } else {
         onCreateQuiz?.(null);
       }
     } else {
       // Student
       if (quizSession) {
-        handleStudentJoin(quizSession._id || quizSession.sessionId);
+        handleStudentJoin(quizSession);
       } else {
         alert('📝 No quiz available right now!\n\nWait for your teacher to create and publish a quiz.');
       }
@@ -319,18 +321,6 @@ const FloatingQuizButton = ({
           </div>
         )}
       </div>
-
-      {/* ── Teacher: Quiz Control Panel ──────────────────────────── */}
-      {isTeacher && showControlPanel && (
-        <QuizControlPanel
-          groupId={groupId}
-          onClose={() => setShowControlPanel(false)}
-          onStartQuiz={() => {
-            setShowControlPanel(false);
-            onCreateQuiz?.(null);
-          }}
-        />
-      )}
     </>
   );
 };
