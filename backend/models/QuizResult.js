@@ -113,8 +113,14 @@ const quizResultSchema = new mongoose.Schema({
   teamId:     { type: String, default: null },
   teamRank:   { type: Number, default: null },
   teamRating: { type: Number, default: null },
-  awardsEarned: [{ type: String }]
-  
+  awardsEarned: [{ type: String }],
+
+  // Milestone 11: the celebration this student chose on the Final Results podium
+  // (top-3 finishers only) — copied from QuizSession.participants.celebrationEmote
+  // at finalization time, for permanent quiz-history record. Null if they never
+  // finished top-3, or finished top-3 but the quiz ended before they chose.
+  celebrationEmote: { type: String, default: null }
+
 }, {
   timestamps: true
 });

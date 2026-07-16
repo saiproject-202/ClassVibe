@@ -76,6 +76,14 @@ const quizSessionSchema = new mongoose.Schema({
     teamId: {
       type: String,
       default: null
+    },
+    // Milestone 11: the celebration a top-3 finisher chose on the Final Results
+    // podium — null until they choose (see student:chooseCelebration in
+    // quiz-socket-handlers.js). Copied onto QuizResult.celebrationEmote when the
+    // session finalizes, for permanent history.
+    celebrationEmote: {
+      type: String,
+      default: null
     }
   }],
 
@@ -299,7 +307,10 @@ quizSessionSchema.statics.findActiveSession = function(groupId) {
     status: { $in: ['waiting', 'active', 'paused'] }
   }).populate('quiz').populate('host', 'name username')
     // ✅ NEW: lets the Lobby show a quick-quiz classroom's PIN+QR without a second fetch
-    .populate('group', 'pin qrCode isQuickQuiz groupName');
+    .populate('group', 'pin qrCode isQuickQuiz groupName')
+    // Milestone 6 (Lobby avatar display): lets the teacher's REST lobby fetch show each
+    // student's real avatar data (skinTone/title/badges) instead of a generic placeholder.
+    .populate('participants.user', 'avatar');
 };
 
 // ========================================

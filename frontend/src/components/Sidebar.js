@@ -18,7 +18,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 
 // ─── inline Settings component ──────────────────────────────────────────────
-const Settings = ({ onClose, onUserUpdated, isDark }) => {
+export const Settings = ({ onClose, onUserUpdated, isDark }) => {
   const [user,         setUser]         = useState(null);
   const [username,     setUsername]     = useState('');
   const [photoPreview, setPhotoPreview] = useState(null);

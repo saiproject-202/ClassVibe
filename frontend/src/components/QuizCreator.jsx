@@ -119,7 +119,7 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
       } else if (mode === 'school_house') {
         teams = SCHOOL_HOUSE_PRESETS.map(h => ({ ...h }));
         allowStudentChoice = true;
-      } else if (mode === 'team_battle' && (prev.quizMode === 'random_teams' || prev.quizMode === 'school_house')) {
+      } else if ((mode === 'team_battle' || mode === 'custom_teams') && (prev.quizMode === 'random_teams' || prev.quizMode === 'school_house')) {
         // Coming from an auto-populated mode — reset to blank rows for manual entry.
         // (Switching between team_battle <-> team_battle, or arriving fresh, keeps
         // whatever the teacher already typed.)
@@ -1127,6 +1127,17 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
                   >
                     <div style={styles.quizModeOptionTitle}>🏠 School House</div>
                     <div style={styles.quizModeOptionDesc}>Starts with Red/Blue/Green/Yellow House — rename if your school uses different ones.</div>
+                  </div>
+                  {/* ✅ NEW: restored as its own mode — same team-editing UI as Team
+                      Battle underneath, but a different teacher intent: "I already have
+                      groups" (school houses, class sections, departments) vs. "set up a
+                      competition." Distinct enough to matter for how teachers scan this list. */}
+                  <div
+                    onClick={() => handleQuizModeChange('custom_teams')}
+                    style={{ ...styles.quizModeOption, ...(settings.quizMode === 'custom_teams' ? styles.quizModeOptionActive : {}) }}
+                  >
+                    <div style={styles.quizModeOptionTitle}>🛠 Custom Teams</div>
+                    <div style={styles.quizModeOptionDesc}>You already have groups — sections, houses, departments. Name them exactly as they are.</div>
                   </div>
                 </div>
 

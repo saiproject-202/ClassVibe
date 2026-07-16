@@ -46,6 +46,7 @@ const Header = ({
                        // pass as: <Header group={currentGroup} ... />
   isDark,              // global dark mode flag
   onToggleTheme,       // theme toggle callback
+  onOpenProfile,       // opens the Teacher/Student Profile overlay (App.js)
 }) => {
 
   // ── Resolve user: prop → localStorage → null ────────────────────────────
@@ -142,8 +143,14 @@ const Header = ({
                     {resolvedUser.role || userRole || ''}
                   </span>
                 </div>
-                {/* Avatar: photo → initials circle */}
-                <div style={S.avatarWrap}>
+                {/* Avatar: photo → initials circle. Click opens the Profile screen. */}
+                <button
+                  type="button"
+                  onClick={onOpenProfile}
+                  style={S.avatarWrap}
+                  title="View profile"
+                  aria-label="View profile"
+                >
                   {resolvedUser.profilePhoto ? (
                     <img
                       src={resolvedUser.profilePhoto}
@@ -156,7 +163,7 @@ const Header = ({
                     </div>
                   )}
                   <div style={S.onlineDot} />
-                </div>
+                </button>
               </div>
             )}
 
@@ -427,7 +434,7 @@ const S = {
   userTextBlock:  { display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1, minWidth: 0, overflow: 'hidden', maxWidth: 160 },
   userName:       { fontSize: 13, fontWeight: '700', lineHeight: 1.2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' },
   userRoleLabel:  { fontSize: 11, textTransform: 'capitalize', whiteSpace: 'nowrap' },
-  avatarWrap:     { position: 'relative', flexShrink: 0 },
+  avatarWrap:     { position: 'relative', flexShrink: 0, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' },
   avatarImg:      { width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e2e8f0', display: 'block' },
   avatarFallback: { width: 36, height: 36, borderRadius: '50%', backgroundColor: '#6366f1', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: '700' },
   onlineDot:      { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, backgroundColor: '#22c55e', borderRadius: '50%', border: '2px solid white' },

@@ -274,4 +274,69 @@ export const getUnauthorizedAttempts = async (sessionId) => {
   } catch (error) { console.error('Get unauthorized attempts error:', error); throw error; }
 };
 
+// ============================================
+// AVATAR API CALLS (see AVATAR_FOUNDATION.md)
+// ============================================
+export const getAvatar = async () => {
+  try {
+    const response = await api.get('/avatar');
+    return response.data;
+  } catch (error) { console.error('Get avatar error:', error); throw error; }
+};
+
+export const updateAvatar = async (avatarPatch) => {
+  try {
+    const response = await api.put('/avatar', avatarPatch);
+    return response.data;
+  } catch (error) { console.error('Update avatar error:', error); throw error; }
+};
+
+export const getAvatarCatalog = async () => {
+  try {
+    const response = await api.get('/avatar/catalog');
+    return response.data;
+  } catch (error) { console.error('Get avatar catalog error:', error); throw error; }
+};
+
+// ============================================
+// PROFILE API CALLS
+// ============================================
+export const getTeacherProfile = async () => {
+  try {
+    const response = await api.get('/profile/teacher');
+    return response.data;
+  } catch (error) { console.error('Get teacher profile error:', error); throw error; }
+};
+
+export const updateTeacherProfile = async (profilePatch) => {
+  try {
+    const response = await api.put('/profile/teacher', profilePatch);
+    return response.data;
+  } catch (error) { console.error('Update teacher profile error:', error); throw error; }
+};
+
+export const getStudentProfile = async () => {
+  try {
+    const response = await api.get('/profile/student');
+    return response.data;
+  } catch (error) { console.error('Get student profile error:', error); throw error; }
+};
+
+// ============================================
+// REWARDS LOCKER API CALLS
+// ============================================
+export const getRewardsLocker = async () => {
+  try {
+    const response = await api.get('/rewards/locker');
+    return response.data;
+  } catch (error) { console.error('Get rewards locker error:', error); throw error; }
+};
+
+export const acknowledgeUnlocks = async (itemIds) => {
+  try {
+    const response = await api.post('/rewards/acknowledge-unlocks', { itemIds });
+    return response.data;
+  } catch (error) { console.error('Acknowledge unlocks error:', error); throw error; }
+};
+
 export default api;

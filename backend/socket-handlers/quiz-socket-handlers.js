@@ -19,6 +19,11 @@ const User        = require('../models/User');
 // Store active quiz timers
 const activeQuizTimers = new Map();
 
+// Milestone 11: must stay in sync with CELEBRATION_EMOTES in
+// frontend/src/avatarConstants.js — the fixed set of celebration choices a
+// top-3 finisher can pick on the Final Results podium.
+const ALLOWED_CELEBRATION_EMOTES = ['celebrate', 'clap', 'wave', 'victory', 'thankYou', 'teamRespect'];
+
 /**
  * Setup quiz-related socket event handlers
  */
@@ -33,12 +38,45 @@ function setupQuizSocketHandlers(io, socket) {
    * Teacher joins the quiz session socket room so they receive all session events.
    * Must be emitted by QuizHost immediately on mount, before any other quiz event.
    */
-  socket.on('teacher:joinSession', (data) => {
+  socket.on('teacher:joinSession', async (data) => {
     const { sessionId } = data || {};
     if (!sessionId) return;
     socket.join(sessionId);
     console.log(`👨‍🏫 Teacher ${socket.userId} joined session room: ${sessionId}`);
     socket.emit('teacher:sessionJoined', { sessionId });
+
+    // ✅ NEW (teacher spectator view): send the teacher the current question state, the
+    // same shape students get from quiz:joined, so a teacher watching the live student
+    // flow in spectator mode (QuizPlayer) syncs to the current question IMMEDIATELY on
+    // (re)join — instead of a blank screen until the next room broadcast. Purely additive:
+    // QuizControlPanel doesn't listen for quiz:joined, so it ignores this harmlessly.
+    try {
+      const session = await QuizSession.findById(sessionId).populate('quiz');
+      if (!session || !session.quiz) return;
+      let timeRemaining = 0;
+      if (session.status === 'active') {
+        const timerInfo = activeQuizTimers.get(sessionId);
+        timeRemaining = timerInfo
+          ? timerInfo.timeRemaining
+          : (session.quiz.questions[session.currentQuestionIndex]?.timeLimit || 45);
+      }
+      socket.emit('quiz:joined', {
+        sessionId,
+        status:          session.status,
+        totalQuestions:  session.quiz.questions.length,
+        currentQuestion: session.status === 'active'
+          ? { questionIndex: session.currentQuestionIndex, question: session.quiz.questions[session.currentQuestionIndex] }
+          : null,
+        timeRemaining,
+        teams:           session.teams || [],
+        myTeamId:        null,          // teacher isn't on a team
+        allowStudentChoice: session.sessionSettings?.allowStudentChoice !== false,
+        quizMode:        session.sessionSettings?.quizMode || 'individual',
+        spectator:       true
+      });
+    } catch (e) {
+      console.error('teacher:joinSession state sync failed:', e.message);
+    }
   });
 
   /**
@@ -197,8 +235,9 @@ function setupQuizSocketHandlers(io, socket) {
       session.status = 'completed';
       await session.save();
 
-      const leaderboard = getLeaderboard(session);
-      const teamLeaderboard = getTeamLeaderboard(session, session.quiz); // ✅ NEW (Phase 3) — [] in individual mode
+      const avatarByUserId = await buildAvatarLookup(session); // Milestone 8 (Leaderboard avatar display)
+      const leaderboard = getLeaderboard(session, avatarByUserId);
+      const teamLeaderboard = getTeamLeaderboard(session, session.quiz, avatarByUserId); // ✅ NEW (Phase 3) — [] in individual mode
 
       await sendChatNotification(io, session, 'quiz_ended', leaderboard);
 
@@ -262,11 +301,13 @@ function setupQuizSocketHandlers(io, socket) {
       // ✅ NEW: Look up real user name from DB
       let userName     = `Student`;
       let userUsername = '';
+      let userAvatar   = null; // Milestone 6 (Lobby avatar display)
       try {
-        const userDoc = await User.findById(socket.userId).select('name username email');
+        const userDoc = await User.findById(socket.userId).select('name username email avatar');
         if (userDoc) {
           userName     = userDoc.name || userDoc.username || userDoc.email?.split('@')[0] || 'Student';
           userUsername = userDoc.username || '';
+          userAvatar   = userDoc.avatar || null;
         }
       } catch (e) {
         console.warn('Could not fetch user name for quiz join:', e.message);
@@ -344,6 +385,9 @@ function setupQuizSocketHandlers(io, socket) {
         }
       }
 
+      // Milestone 6 (Lobby avatar display)
+      const avatarByUserId = await buildAvatarLookup(session);
+
       // Send current state to student
       socket.emit('quiz:joined', {
         sessionId,
@@ -361,11 +405,14 @@ function setupQuizSocketHandlers(io, socket) {
         teams:              session.teams || [],
         myTeamId:           participant.teamId || null,
         allowStudentChoice: session.sessionSettings?.allowStudentChoice !== false,
+        // ✅ NEW: lets the Lobby show a read-only "Quiz Mode" label for students too
+        quizMode:           session.sessionSettings?.quizMode || 'individual',
         // ✅ NEW (Phase 6 — Lobby): existing roster snapshot, so a freshly-joining
         // student can immediately see who's already here instead of only learning about
         // people who join AFTER them via the live 'student:joined' broadcast.
         participants: session.participants.map(p => ({
-          userId: p.user, name: p.name || 'Student', teamId: p.teamId || null
+          userId: p.user, name: p.name || 'Student', teamId: p.teamId || null,
+          avatar: avatarByUserId[p.user.toString()] || null // Milestone 6 (Lobby avatar display)
         }))
       });
 
@@ -375,6 +422,7 @@ function setupQuizSocketHandlers(io, socket) {
         userId:       socket.userId,
         name:         userName,
         username:     userUsername,
+        avatar:       userAvatar, // Milestone 6 (Lobby avatar display)
         studentCount: session.participants.length
       });
 
@@ -485,6 +533,69 @@ function setupQuizSocketHandlers(io, socket) {
     } catch (error) {
       console.error('❌ Select team error:', error);
       socket.emit('error', { message: 'Failed to select team' });
+    }
+  });
+
+  /**
+   * Milestone 11: top-3 finisher picks their celebration on the Final Results
+   * podium. Only callable once the quiz is completed, and only by whoever's
+   * CURRENT rank (recomputed here, not trusted from the client) is 1st/2nd/3rd.
+   * Stored on the live session's participant subdoc (no race with
+   * finalizeQuizSession's QuizResult creation, which reads it back off there),
+   * then broadcast so the teacher and every other student see it update live.
+   */
+  socket.on('student:chooseCelebration', async (data) => {
+    try {
+      const { sessionId, emote } = data || {};
+      if (!socket.userId) {
+        return socket.emit('error', { message: 'Not authenticated. Please refresh and try again.' });
+      }
+
+      if (!ALLOWED_CELEBRATION_EMOTES.includes(emote)) {
+        return socket.emit('error', { message: 'Invalid celebration.' });
+      }
+
+      const session = await QuizSession.findById(sessionId);
+      if (!session) return socket.emit('error', { message: 'Session not found' });
+
+      if (session.status !== 'completed') {
+        return socket.emit('error', { message: 'The quiz has to finish before you can celebrate.' });
+      }
+
+      const participant = session.participants.find(
+        p => p.user.toString() === socket.userId.toString()
+      );
+      if (!participant) {
+        return socket.emit('error', { message: 'You did not participate in this quiz.' });
+      }
+
+      const rank = getLeaderboard(session).find(
+        entry => entry.userId.toString() === socket.userId.toString()
+      )?.rank;
+      if (!rank || rank > 3) {
+        return socket.emit('error', { message: 'Only the top 3 finishers choose a celebration.' });
+      }
+
+      participant.celebrationEmote = emote;
+      await session.save();
+
+      // Keep the permanent history record in sync too, if it already exists —
+      // finalizeQuizSession may not have run yet (non-fatal if it hasn't; it'll
+      // read the same value off this session's participant when it does).
+      try {
+        await QuizResult.updateOne(
+          { session: sessionId, student: socket.userId },
+          { $set: { celebrationEmote: emote } }
+        );
+      } catch (resultSyncError) {
+        console.error('⚠️ QuizResult celebrationEmote sync failed (non-fatal):', resultSyncError.message);
+      }
+
+      io.to(sessionId).emit('celebration:chosen', { userId: socket.userId, emote });
+      console.log(`🎉 Student ${socket.userId} chose celebration "${emote}" (rank #${rank}) in session ${sessionId}`);
+    } catch (error) {
+      console.error('❌ Choose celebration error:', error);
+      socket.emit('error', { message: 'Failed to save your celebration' });
     }
   });
 
@@ -719,6 +830,20 @@ async function handleQuestionComplete(io, session, questionIndex) {
     // a fully consistent, up-to-date document.
     updatedSession = await QuizSession.findById(sessionId).populate('quiz');
 
+    // ✅ NEW: computed once, up front, so every participant's personal reveal can be
+    // stamped with their CURRENT rank (their previous rank is already sitting in the
+    // client's own state from the last leaderboard:show — "rank movement" is a client-
+    // side diff of the two, no extra persistence needed). Reused again below for the
+    // leaderboard broadcast so it's only ever computed once per question.
+    const avatarByUserId = await buildAvatarLookup(updatedSession); // Milestone 8 (Leaderboard avatar display)
+    const rankLeaderboard = getLeaderboard(updatedSession, avatarByUserId);
+    const rankByUserId = {};
+    rankLeaderboard.forEach(entry => { rankByUserId[entry.userId.toString()] = entry.rank; });
+
+    // ✅ NEW: computed once, up front, and reused by both the Question Summary
+    // ("fastest correct answer") and the Leaderboard ("Question MVP") broadcasts below.
+    const questionMVP = computeQuestionMVP(updatedSession, questionIndex);
+
     // ✅ NEW: reveal correct/wrong to EVERY participant at the same moment — when the
     // timer ends — instead of the old behavior where each student found out the
     // instant they personally submitted, before anyone else had even answered.
@@ -738,7 +863,8 @@ async function handleQuestionComplete(io, session, questionIndex) {
         streak:          participant.streak || 0,
         questionText:    question.questionText,
         options:         question.options,
-        questionType:    question.questionType || 'multiple_choice'
+        questionType:    question.questionType || 'multiple_choice',
+        rank:            rankByUserId[participant.user.toString()] || null // ✅ NEW: rank movement
       });
     }
 
@@ -753,73 +879,84 @@ async function handleQuestionComplete(io, session, questionIndex) {
       totalStudents: updatedSession.participants.length
     });
 
+    // ✅ NEW: finalized question-cycle pacing —
+    //   Correct/Wrong Feedback (shown now) → Question Summary → Leaderboard → Countdown → Next Question
+    // Countdown itself is not a separate server event — the client shows a self-driven
+    // "next question in Ns" transition for the known remaining delay below, then reacts
+    // to the real quiz:nextQuestion/quiz:finished event exactly as it always has.
     setTimeout(() => {
-      const leaderboard = getLeaderboard(updatedSession);
-      const teamLeaderboard = getTeamLeaderboard(updatedSession, updatedSession.quiz); // ✅ NEW (Phase 3)
-      const questionMVP = computeQuestionMVP(updatedSession, questionIndex); // ✅ NEW (Phase 5.2)
+      // ── Question Summary: educational beat, class-wide stats for this question ──
+      const questionStats = computeQuestionStats(updatedSession, questionIndex, questionMVP);
+      io.to(sessionId).emit('question:summary', { questionIndex, ...questionStats });
 
-      io.to(sessionId).emit('leaderboard:show', {
-        leaderboard,
-        teamLeaderboard, // ✅ NEW (Phase 3)
-        questionMVP, // ✅ NEW (Phase 5.2)
-        questionIndex,
-        isLastQuestion: questionIndex >= updatedSession.quiz.questions.length - 1
-      });
+      setTimeout(() => {
+        // ── Leaderboard: competitive beat, ranked list only (no podium/celebration —
+        // that's reserved for the very end of the quiz) ──
+        const teamLeaderboard = getTeamLeaderboard(updatedSession, updatedSession.quiz, avatarByUserId); // ✅ NEW (Phase 3)
 
-      if (questionIndex < updatedSession.quiz.questions.length - 1) {
-        setTimeout(async () => {
-          const nextIndex = questionIndex + 1;
+        io.to(sessionId).emit('leaderboard:show', {
+          leaderboard: rankLeaderboard,
+          teamLeaderboard, // ✅ NEW (Phase 3)
+          questionMVP, // ✅ NEW (Phase 5.2)
+          questionIndex,
+          isLastQuestion: questionIndex >= updatedSession.quiz.questions.length - 1
+        });
 
-          updatedSession.currentQuestionIndex = nextIndex;
-          await updatedSession.save();
+        if (questionIndex < updatedSession.quiz.questions.length - 1) {
+          setTimeout(async () => {
+            const nextIndex = questionIndex + 1;
 
-          const nextQuestion      = updatedSession.quiz.questions[nextIndex];
-          const questionTimeLimit = nextQuestion.timeLimit || 45;
+            updatedSession.currentQuestionIndex = nextIndex;
+            await updatedSession.save();
 
-          startQuestionTimer(io, updatedSession, nextIndex, questionTimeLimit);
+            const nextQuestion      = updatedSession.quiz.questions[nextIndex];
+            const questionTimeLimit = nextQuestion.timeLimit || 45;
 
-          io.to(sessionId).emit('quiz:nextQuestion', {
-            questionIndex: nextIndex,
-            question: {
-              questionText: nextQuestion.questionText,
-              options:      nextQuestion.options,
-              timeLimit:    questionTimeLimit,
-              points:       nextQuestion.points || 10,
-              questionType: nextQuestion.questionType || 'multiple_choice'
-            },
-            totalQuestions: updatedSession.quiz.questions.length
-          });
+            startQuestionTimer(io, updatedSession, nextIndex, questionTimeLimit);
 
-          if (updatedSession.teams && updatedSession.teams.length > 0) {
-            io.to(sessionId).emit('team:momentumUpdate', { teams: computeMomentum(updatedSession, updatedSession.quiz) });
-          }
+            io.to(sessionId).emit('quiz:nextQuestion', {
+              questionIndex: nextIndex,
+              question: {
+                questionText: nextQuestion.questionText,
+                options:      nextQuestion.options,
+                timeLimit:    questionTimeLimit,
+                points:       nextQuestion.points || 10,
+                questionType: nextQuestion.questionType || 'multiple_choice'
+              },
+              totalQuestions: updatedSession.quiz.questions.length
+            });
 
-          console.log(`➡️ Auto-advanced to question ${nextIndex + 1}`);
-        }, 5000);
-      } else {
-        // Last question — end quiz
-        setTimeout(async () => {
-          // Mark session completed
-          updatedSession.status = 'completed';
-          await updatedSession.save();
+            if (updatedSession.teams && updatedSession.teams.length > 0) {
+              io.to(sessionId).emit('team:momentumUpdate', { teams: computeMomentum(updatedSession, updatedSession.quiz) });
+            }
 
-          const finalLeaderboard = getLeaderboard(updatedSession);
-          const finalTeamLeaderboard = getTeamLeaderboard(updatedSession, updatedSession.quiz); // ✅ NEW (Phase 3)
-          await sendChatNotification(io, updatedSession, 'quiz_ended', finalLeaderboard);
+            console.log(`➡️ Auto-advanced to question ${nextIndex + 1}`);
+          }, 3000); // ✅ CHANGED: this delay IS the client's Countdown duration
+        } else {
+          // Last question — end quiz
+          setTimeout(async () => {
+            // Mark session completed
+            updatedSession.status = 'completed';
+            await updatedSession.save();
 
-          // ✅ CONSISTENT: always 'quiz:finished' (same event as teacher:endQuiz)
-          io.to(sessionId).emit('quiz:finished', {
-            leaderboard: finalLeaderboard,
-            teamLeaderboard: finalTeamLeaderboard, // ✅ NEW (Phase 3)
-            message:     'Quiz completed!'
-          });
-          console.log('🏁 Quiz finished (auto)');
+            const finalLeaderboard = getLeaderboard(updatedSession, avatarByUserId);
+            const finalTeamLeaderboard = getTeamLeaderboard(updatedSession, updatedSession.quiz, avatarByUserId); // ✅ NEW (Phase 3)
+            await sendChatNotification(io, updatedSession, 'quiz_ended', finalLeaderboard);
 
-          // ✅ NEW: persist QuizResult/Analytics — runs after quiz:finished so it never delays students
-          await finalizeQuizSession(io, updatedSession, finalLeaderboard);
-        }, 5000);
-      }
-    }, 10000);
+            // ✅ CONSISTENT: always 'quiz:finished' (same event as teacher:endQuiz)
+            io.to(sessionId).emit('quiz:finished', {
+              leaderboard: finalLeaderboard,
+              teamLeaderboard: finalTeamLeaderboard, // ✅ NEW (Phase 3)
+              message:     'Quiz completed!'
+            });
+            console.log('🏁 Quiz finished (auto)');
+
+            // ✅ NEW: persist QuizResult/Analytics — runs after quiz:finished so it never delays students
+            await finalizeQuizSession(io, updatedSession, finalLeaderboard);
+          }, 3000);
+        }
+      }, 3000); // Leaderboard shown for 3s before Countdown
+    }, 4000); // Correct/Wrong Feedback shown for 4s before Question Summary
 
   } catch (error) {
     console.error('❌ Question complete handler error:', error);
@@ -854,7 +991,7 @@ function assignToSmallestTeam(session, participant) {
  * number and rank, never this formula ("transparent to students, not to formulas").
  * Returns [] in individual mode (session.teams empty).
  */
-function getTeamLeaderboard(session, quiz) {
+function getTeamLeaderboard(session, quiz, avatarByUserId = {}) {
   if (!session.teams || session.teams.length === 0) return [];
 
   const maxPossibleScore = quiz.getTotalPoints() || 1;
@@ -898,7 +1035,10 @@ function getTeamLeaderboard(session, quiz) {
       averageScore:      Math.round(avgScore * 10) / 10,
       participationRate: Math.round(participationRate),
       teamRating:        Math.round(teamRating * 10) / 10,
-      members: members.map(p => ({ userId: p.user, name: p.name || 'Student', score: p.score || 0 }))
+      members: members.map(p => ({
+        userId: p.user, name: p.name || 'Student', score: p.score || 0,
+        avatar: avatarByUserId[p.user.toString()] || null
+      }))
     };
   });
 
@@ -961,9 +1101,76 @@ function computeQuestionMVP(session, questionIndex) {
 }
 
 /**
- * Generate leaderboard — UNCHANGED
+ * ✅ NEW: per-question aggregate stats for the "Question Summary" beat — an educational
+ * moment (class-wide performance on THIS question) shown before the competitive
+ * Leaderboard, per the finalized question-cycle flow:
+ *   Correct/Wrong Feedback → Question Summary → Leaderboard → Countdown → Next Question
  */
-function getLeaderboard(session) {
+function computeQuestionStats(session, questionIndex, questionMVP) {
+  const answers = session.participants
+    .map(p => p.answers.find(a => a.questionIndex === questionIndex))
+    .filter(Boolean);
+
+  const totalAnswered  = answers.length;
+  const correctCount   = answers.filter(a => a.isCorrect).length;
+  const correctPercent = totalAnswered > 0 ? Math.round((correctCount / totalAnswered) * 100) : 0;
+  const avgTimeTaken   = totalAnswered > 0
+    ? Math.round(answers.reduce((sum, a) => sum + (a.timeTaken || 0), 0) / totalAnswered)
+    : 0;
+
+  // Team comparison — this question only, separate from the cumulative team leaderboard
+  let teamComparison = [];
+  if (session.teams && session.teams.length > 0) {
+    teamComparison = session.teams.map(team => {
+      const teamAnswers = session.participants
+        .filter(p => p.teamId === team.teamId)
+        .map(p => p.answers.find(a => a.questionIndex === questionIndex))
+        .filter(Boolean);
+      const teamCorrect = teamAnswers.filter(a => a.isCorrect).length;
+      return {
+        teamId:         team.teamId,
+        name:           team.name,
+        icon:           team.icon,
+        color:          team.color,
+        correctCount:   teamCorrect,
+        totalCount:     teamAnswers.length,
+        correctPercent: teamAnswers.length > 0 ? Math.round((teamCorrect / teamAnswers.length) * 100) : 0
+      };
+    });
+  }
+
+  return {
+    correctPercent,
+    avgTimeTaken,
+    // "Fastest correct answer" reuses the MVP calc (highest points, fastest-time
+    // tiebreak) — since this scoring system awards more points for faster correct
+    // answers, the MVP is already effectively the fastest correct answerer.
+    fastestCorrect: questionMVP ? { name: questionMVP.name, timeTaken: questionMVP.timeTaken } : null,
+    teamComparison
+  };
+}
+
+/**
+ * Milestone 6/8 (Lobby/Leaderboard avatar display): batch-fetch every participant's
+ * avatar in one query, keyed by userId string. Kept separate from populating
+ * session.participants.user directly — several call sites compare p.user.toString()
+ * against socket.userId, which needs p.user to stay a raw ObjectId, not a populated
+ * subdocument.
+ */
+async function buildAvatarLookup(session) {
+  const participantUserIds = session.participants.map(p => p.user);
+  const avatarDocs = await User.find({ _id: { $in: participantUserIds } }).select('avatar');
+  const avatarByUserId = {};
+  avatarDocs.forEach(u => { avatarByUserId[u._id.toString()] = u.avatar; });
+  return avatarByUserId;
+}
+
+/**
+ * Generate leaderboard — ✅ CHANGED (Milestone 8): optional avatarByUserId map (from
+ * buildAvatarLookup) attaches each entry's real avatar data for the Leaderboard's
+ * avatar display; defaults to {} so internal/aggregate-only callers are unaffected.
+ */
+function getLeaderboard(session, avatarByUserId = {}) {
   return session.participants
     .map(p => ({
       userId:         p.user,
@@ -971,7 +1178,9 @@ function getLeaderboard(session) {
       score:          p.score,
       correctAnswers: p.answers.filter(a => a.isCorrect).length,
       totalAnswers:   p.answers.length,
-      streak:         p.streak || 0
+      streak:         p.streak || 0,
+      avatar:         avatarByUserId[p.user.toString()] || null,
+      celebrationEmote: p.celebrationEmote || null // Milestone 11
     }))
     .sort((a, b) => b.score !== a.score ? b.score - a.score : b.correctAnswers - a.correctAnswers)
     .map((entry, index) => ({ ...entry, rank: index + 1 }));
@@ -1052,7 +1261,8 @@ async function finalizeQuizSession(io, session, leaderboard) {
           startedAt: participant.joinedAt || session.createdAt || new Date(),
           completedAt: new Date(),
           rank: rankByUserId.get(participant.user.toString()) || null,
-          teamId: participant.teamId || null // ✅ NEW (Phase 3) — null in individual mode
+          teamId: participant.teamId || null, // ✅ NEW (Phase 3) — null in individual mode
+          celebrationEmote: participant.celebrationEmote || null // Milestone 11
         });
 
         result.calculateMetrics();
@@ -1060,6 +1270,17 @@ async function finalizeQuizSession(io, session, leaderboard) {
         await result.save();
         resultsCreated++;
         resultsForAwards.push({ result, name: participant.name || 'Student' });
+
+        // Milestone 9 (Rewards Locker): a rank-1 finish earns the 'champion' badge —
+        // synced onto the avatar so it's visible everywhere a badge pip already renders
+        // (Chat, Lobby, Leaderboard, Profile) without needing a new game mechanic.
+        if (result.badge === 'gold') {
+          try {
+            await User.findByIdAndUpdate(participant.user, { $addToSet: { 'avatar.badges': 'champion' } });
+          } catch (badgeSyncError) {
+            console.error('⚠️ champion badge sync failed (non-fatal):', badgeSyncError.message);
+          }
+        }
 
         sessionScoreSum += participant.score;
 
@@ -1127,9 +1348,14 @@ async function finalizeQuizSession(io, session, leaderboard) {
             if (award.userId) {
               const r = resultByUserId.get(award.userId.toString());
               if (r) { r.awardsEarned.push(award.type); await r.save(); }
+              // Milestone 9 (Rewards Locker): sync onto the avatar too
+              await User.findByIdAndUpdate(award.userId, { $addToSet: { 'avatar.badges': award.type } });
             } else if (award.teamId) {
               const teamMembers = resultsForAwards.filter(({ result }) => result.teamId === award.teamId);
-              for (const { result: r } of teamMembers) { r.awardsEarned.push(award.type); await r.save(); }
+              for (const { result: r } of teamMembers) {
+                r.awardsEarned.push(award.type); await r.save();
+                await User.findByIdAndUpdate(r.student, { $addToSet: { 'avatar.badges': award.type } });
+              }
             }
           } catch (stampError) {
             console.error('⚠️ awardsEarned stamping failed for one award (non-fatal):', stampError.message);
@@ -1284,10 +1510,12 @@ async function sendChatNotification(io, session, type, leaderboard = null) {
     if (type === 'quiz_started') {
       const message = await Message.create({
         group:       groupId,
+        sender:      session.host,
         messageType: 'quiz_started',
         content:     `📝 Quiz Started: ${session.quiz.title}\n\nJoin now!`,
         metadata:    { quizId: session.quiz._id, sessionId: session._id }
       });
+      await message.populate('sender', 'username name isOnline avatar');
       io.to(groupId.toString()).emit('newMessage', { message });
 
     } else if (type === 'quiz_ended') {
@@ -1297,6 +1525,7 @@ async function sendChatNotification(io, session, type, leaderboard = null) {
 
       const message = await Message.create({
         group:       groupId,
+        sender:      session.host,
         messageType: 'quiz_ended',
         content:     `🎉 Quiz completed!\n🏆 ${winnerUser?.name || 'Winner'}: ${winner.score} pts`,
         metadata:    {
@@ -1306,6 +1535,7 @@ async function sendChatNotification(io, session, type, leaderboard = null) {
           winnerScore: winner.score
         }
       });
+      await message.populate('sender', 'username name isOnline avatar');
       io.to(groupId.toString()).emit('newMessage', { message });
     }
   } catch (error) {

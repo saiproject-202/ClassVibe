@@ -85,6 +85,10 @@ app.get("/health", (req, res) => {
 const quizRoutes = require('./routes/quiz');                    // ⭐ ADD THIS
 const analyticsRoutes = require('./routes/analytics');          // ⭐ ADD THIS
 const notificationRoutes = require('./routes/notifications');   // ⭐ ADD THIS
+const profileRoutes = require('./routes/profile');
+const rewardsRoutes = require('./routes/rewards');
+const { AVATAR_ITEM_CATALOG } = require('./avatarCatalog');
+const { BADGE_CATALOG } = require('./badgeCatalog');
 const { startSessionReminderJob } = require('./jobs/sessionReminder');
 // Add this with other route imports (around line 20)
 const quizTestRoutes = require('./routes/quiz-test');
@@ -100,6 +104,8 @@ app.use(express.urlencoded({ extended: true }));
 
 app.use('/api/quiz', quizRoutes);                   // ⭐ ADD THIS
 app.use('/api/analytics', analyticsRoutes);         // ⭐ ADD THIS
+app.use('/api/profile', profileRoutes);
+app.use('/api/rewards', rewardsRoutes);
 app.use('/api/notifications', notificationRoutes);  // ⭐ ADD THIS
 
 // ============================================
@@ -472,6 +478,81 @@ app.put('/api/auth/update-profile', authenticateToken, async (req, res) => {
     });
   } catch (err) {
     console.error('Update profile error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ------------------
+// AVATAR (see AVATAR_FOUNDATION.md for the data model this reads/writes)
+// ------------------
+app.get('/api/avatar', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('avatar');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json({ avatar: user.avatar });
+  } catch (err) {
+    console.error('Get avatar error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.put('/api/avatar', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    // badges is intentionally excluded — earned via the Rewards system, not user-editable here
+    const editableFields = ['gender', 'skinTone', 'hair', 'eyes', 'shirt', 'pants', 'shoes', 'accessory', 'background', 'favoriteEmote', 'title', 'favoriteItems'];
+    for (const field of editableFields) {
+      if (req.body[field] !== undefined) {
+        user.avatar[field] = req.body[field];
+      }
+    }
+    await user.save();
+    res.json({ message: 'Avatar updated', avatar: user.avatar });
+  } catch (err) {
+    if (err.name === 'ValidationError') {
+      return res.status(400).json({ error: err.message });
+    }
+    console.error('Update avatar error:', err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// ------------------
+// AVATAR ITEM CATALOG (Milestone 10 — Avatar Builder picker UI)
+// ------------------
+app.get('/api/avatar/catalog', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId).select('avatar');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    const earnedBadges = new Set(user.avatar.badges || []);
+    const favoriteItems = user.avatar.favoriteItems || [];
+    const badgeByslug = {};
+    BADGE_CATALOG.forEach(b => { badgeByslug[b.slug] = b; });
+
+    const catalog = {};
+    for (const slot of Object.keys(AVATAR_ITEM_CATALOG)) {
+      const equippedSlot = user.avatar[slot];
+      catalog[slot] = AVATAR_ITEM_CATALOG[slot].map(item => {
+        const locked = !!(item.unlock && item.unlock.badge && !earnedBadges.has(item.unlock.badge));
+        const isEquipped = !!(equippedSlot && equippedSlot.itemId === item.itemId);
+        const unlockBadge = item.unlock && badgeByslug[item.unlock.badge];
+        return {
+          ...item,
+          locked,
+          isEquipped,
+          equippedVariant: isEquipped ? equippedSlot.variant : null,
+          isFavorite: favoriteItems.includes(item.itemId),
+          unlockHint: unlockBadge ? `Earn the ${unlockBadge.icon} ${unlockBadge.name} badge to unlock` : null
+        };
+      });
+    }
+
+    res.json({ catalog });
+  } catch (err) {
+    console.error('Get avatar catalog error:', err);
     res.status(500).json({ error: 'Server error' });
   }
 });
@@ -967,7 +1048,7 @@ app.get('/api/groups/:groupId/messages', authenticateToken, async (req, res) => 
     }
     
     const messages = await Message.find({ group: groupId })
-      .populate('sender', 'username name isOnline')
+      .populate('sender', 'username name isOnline avatar')
       .sort({ createdAt: 1 })
       .limit(100);
     
@@ -1124,7 +1205,7 @@ io.on('connection', (socket) => {
       
       await message.save();
       
-      await message.populate('sender', 'username name isOnline');
+      await message.populate('sender', 'username name isOnline avatar');
       if (recipientId) {
         await message.populate('recipient', 'username');
       }
@@ -1190,8 +1271,8 @@ io.on('connection', (socket) => {
         
         // Save updated poll
         await message.save();
-        await message.populate('sender', 'username name');
-        
+        await message.populate('sender', 'username name avatar');
+
         // Broadcast updated poll to all group members
         io.to(message.group.toString()).emit('pollUpdated', message);
         
@@ -1224,8 +1305,8 @@ io.on('connection', (socket) => {
       message.editedAt = new Date();
       await message.save();
       
-      await message.populate('sender', 'username name isOnline');
-      
+      await message.populate('sender', 'username name isOnline avatar');
+
       io.to(message.group.toString()).emit('messageEdited', message);
       
     } catch (error) {

@@ -13,6 +13,7 @@
 
 import React, { useRef, useEffect, useState } from 'react';
 import socket from '../socket';
+import LbAvatar from './LbAvatar';
 
 const ChatArea = ({
   messages,
@@ -140,7 +141,6 @@ const ChatArea = ({
   const needsDateSep = (cur, prev) =>
     !prev || new Date(cur.createdAt).toDateString() !== new Date(prev.createdAt).toDateString();
 
-  const getInitials    = (u) => u?.substring(0, 2).toUpperCase() || '??';
   const getAvatarColor = (u) => {
     const c = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#14b8a6'];
     return c[(u?.charCodeAt(0) || 0) % c.length];
@@ -366,6 +366,7 @@ const ChatArea = ({
                 <span style={{ fontSize: 16, width: 24, flexShrink: 0 }}>
                   {i === 0 ? '🥇' : i === 1 ? '🥈' : '🥉'}
                 </span>
+                <LbAvatar name={entry.name || entry.username} avatar={entry.avatar} size={22} />
                 <span style={LB.entryName}>{entry.name || entry.username || `Player ${i + 1}`}</span>
                 <span style={LB.entryScore}>+{entry.score} Points</span>
               </div>
@@ -485,18 +486,24 @@ const ChatArea = ({
                         </div>
                       )}
                     </div>
-                    <div style={{ ...S.avatar, backgroundColor: ownBubbleColor.tick, flexShrink: 0, alignSelf: 'flex-end' }}>
-                      {getInitials(message.sender?.username)}
-                    </div>
+                    <LbAvatar
+                      name={message.sender?.name || message.sender?.username}
+                      avatar={message.sender?.avatar}
+                      size={32}
+                      style={{ alignSelf: 'flex-end' }}
+                    />
                   </div>
                 )}
 
                 {/* Other's message — LEFT */}
                 {!isSys && !isOwn && (
                   <div style={S.otherRow}>
-                    <div style={{ ...S.avatar, backgroundColor: getAvatarColor(message.sender?.username), flexShrink: 0, alignSelf: 'flex-start', marginTop: 20 }}>
-                      {getInitials(message.sender?.username)}
-                    </div>
+                    <LbAvatar
+                      name={message.sender?.name || message.sender?.username}
+                      avatar={message.sender?.avatar}
+                      size={32}
+                      style={{ alignSelf: 'flex-start', marginTop: 20 }}
+                    />
                     <div style={S.otherCol}>
                       {renderMeta(message)}
                       <div style={{ ...S.bubble, backgroundColor: message.isDeleted ? (isDark?'#1e293b':'#f1f5f9') : (isDark?'#1e3a5f':'#ffffff'), borderColor: isDark?'#334155':'#e2e8f0', borderRadius: '3px 12px 12px 12px', opacity: message.isDeleted ? 0.65 : 1 }}>
@@ -678,7 +685,6 @@ const S = {
   ownCol:       { display: 'flex', flexDirection: 'column', gap: 3 },
   otherRow:     { display: 'flex', alignItems: 'flex-start', gap: 10, maxWidth: '70%' },
   otherCol:     { display: 'flex', flexDirection: 'column', gap: 3, flex: 1 },
-  avatar:       { width: 32, height: 32, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: 11, fontWeight: '700' },
   meta:         { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingLeft: 2 },
   metaName:     { fontSize: 13, fontWeight: '700', lineHeight: 1 },
   teacherBadge: { fontSize: 10, fontWeight: '600', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 4, padding: '1px 6px' },

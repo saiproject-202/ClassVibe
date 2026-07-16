@@ -108,14 +108,6 @@ const FloatingQuizButton = ({
     };
   }, [socket, groupId, checkActiveQuiz]);
 
-  // ── Listen for waitingRoom open event from ChatArea ───────────────
-  useEffect(() => {
-    const handler = (e) => {
-      if (onJoinQuiz) onJoinQuiz(e.detail.sessionId);
-    };
-    window.addEventListener('openWaitingRoom', handler);
-    return () => window.removeEventListener('openWaitingRoom', handler);
-  }, [onJoinQuiz]);
 
   // ── Draggable mouse handlers ──────────────────────────────────────
   const onMouseDown = (e) => {
@@ -182,6 +174,20 @@ const FloatingQuizButton = ({
     socket.emit('student:joinQuiz', { sessionId: sid });
     if (onJoinQuiz) onJoinQuiz(session);
   }, [socket, onJoinQuiz]);
+
+  // ── Listen for waitingRoom open event from ChatArea (the chat notification's
+  // "Join Quiz" button) ──────────────────────────────────────────────
+  // ✅ FIXED: this used to call onJoinQuiz(e.detail.sessionId) directly — a bare
+  // string, not the session object App.js's activeQuizSession expects — so
+  // activeQuizSession._id/.status were undefined and the student never actually
+  // transitioned past the Lobby. Routes through handleStudentJoin like the
+  // button's own click, using the button's already-tracked quizSession (same
+  // group, so it's the same session the chat banner is pointing at).
+  useEffect(() => {
+    const handler = () => { if (quizSession) handleStudentJoin(quizSession); };
+    window.addEventListener('openWaitingRoom', handler);
+    return () => window.removeEventListener('openWaitingRoom', handler);
+  }, [quizSession, handleStudentJoin]);
 
   // ── Click handler ─────────────────────────────────────────────────
   const handleClick = () => {

@@ -13,7 +13,7 @@ import Login from './components/Login';
 import TeacherLogin from './pages/TeacherLogin';
 import StudentJoin from './pages/StudentJoin';
 import Header from './components/Header';
-import Sidebar from './components/Sidebar';
+import Sidebar, { Settings as AccountSettings } from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import MessageInput from './components/MessageInput';
 import ScheduleSession from './components/ScheduleSession';
@@ -24,6 +24,10 @@ import './App.css';
 import QuizLobby from './components/QuizLobby';
 import QuizControlPanel from './components/QuizControlPanel';
 import QuizPlayer from './components/QuizPlayer';
+import AvatarBuilder from './components/AvatarBuilder';
+import TeacherProfile from './components/TeacherProfile';
+import MyProfile from './components/MyProfile';
+import RewardsLocker from './components/RewardsLocker';
 // eslint-disable-next-line no-unused-vars
 import Footer from './components/Footer';
 
@@ -336,6 +340,10 @@ function App() {
   const [showWaitingRoom, setShowWaitingRoom] = useState(false);
   const [quizSessionId, setQuizSessionId] = useState(null);
   const [showQuizPlayer, setShowQuizPlayer] = useState(false);
+  const [showAvatarBuilder, setShowAvatarBuilder] = useState(false);
+  const [showRewardsLocker, setShowRewardsLocker] = useState(false);
+  const [showProfile, setShowProfile] = useState(false);
+  const [showAccountSettings, setShowAccountSettings] = useState(false);
 
   const [scheduledSessions, setScheduledSessions] = useState([]);
   const [teacherView, setTeacherView] = useState('dashboard');
@@ -375,6 +383,38 @@ function App() {
   // Stable ref so loadGroups doesn't re-create when currentGroup changes
   const currentGroupRef = useRef(null);
   useEffect(() => { currentGroupRef.current = currentGroup; }, [currentGroup]);
+
+  // ✅ NEW: resume an in-progress quiz on page load/reload instead of always landing on
+  // Dashboard/Chat. activeQuizSession/lobbyCleared are plain React state with no
+  // reload-persistence, so a reload mid-quiz used to strand the user until they
+  // manually clicked the floating quiz button again. Runs once per page load (the ref
+  // gate), the moment currentGroup first becomes available — deliberately does NOT
+  // re-fire later, so manually closing the Lobby/ControlPanel/QuizPlayer via onClose
+  // during the same session doesn't get immediately reopened by this effect.
+  const hasCheckedActiveQuizRef = useRef(false);
+  useEffect(() => {
+    if (hasCheckedActiveQuizRef.current) return;
+    if (!currentGroup?._id) return;
+    hasCheckedActiveQuizRef.current = true;
+    if (!currentGroup.isActive) return;
+    (async () => {
+      try {
+        const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
+        const token = localStorage.getItem('token');
+        const res = await fetch(`${API}/api/quiz/group/${currentGroup._id}/active`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.session) {
+          setActiveQuizSession(data.session);
+          setLobbyCleared(data.session.status === 'active');
+        }
+      } catch (err) {
+        console.warn('Resume active quiz check failed:', err.message);
+      }
+    })();
+  }, [currentGroup]);
 
   // Close three-dots menu when clicking outside
   useEffect(() => {
@@ -585,6 +625,7 @@ function App() {
     // Reset all overlay state so a subsequent login doesn't inherit stale flags
     setShowAnalytics(false); setShowSchedule(false); setShowQuizCreator(false);
     setActiveQuizSession(null); setLobbyCleared(false); setShowWaitingRoom(false); setShowQuizPlayer(false);
+    setShowAvatarBuilder(false); setShowProfile(false); setShowAccountSettings(false); setShowRewardsLocker(false);
     setUser(null); setIsAuthenticated(false); setGroups([]); setCurrentGroup(null); setMessages([]); setAuthScreen('home');
   };
 
@@ -977,7 +1018,36 @@ function App() {
         group={currentGroup}
         isDark={isDark}
         onToggleTheme={toggleTheme}
+        onOpenProfile={() => setShowProfile(true)}
       />
+
+      {showAvatarBuilder && <AvatarBuilder onClose={() => setShowAvatarBuilder(false)} />}
+
+      {showProfile && user?.role === 'teacher' && (
+        <TeacherProfile
+          onClose={() => setShowProfile(false)}
+          onOpenAnalytics={() => { setShowProfile(false); setShowAnalytics(true); }}
+          onOpenSettings={() => { setShowProfile(false); setShowAccountSettings(true); }}
+        />
+      )}
+
+      {showProfile && user?.role !== 'teacher' && (
+        <MyProfile
+          onClose={() => setShowProfile(false)}
+          onEditAvatar={() => { setShowProfile(false); setShowAvatarBuilder(true); }}
+          onViewRewards={() => { setShowProfile(false); setShowRewardsLocker(true); }}
+        />
+      )}
+
+      {showRewardsLocker && <RewardsLocker onClose={() => setShowRewardsLocker(false)} />}
+
+      {showAccountSettings && (
+        <AccountSettings
+          onClose={() => setShowAccountSettings(false)}
+          onUserUpdated={(updatedUser) => setUser(updatedUser)}
+          isDark={isDark}
+        />
+      )}
 
       <Sidebar
         isOpen={isSidebarOpen}
@@ -1041,10 +1111,16 @@ function App() {
           onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
           onEnterLive={() => setLobbyCleared(true)} />
       )}
+      {/* ✅ NEW: teacher watches the SAME live student flow (question → answer reveal →
+          question summary → leaderboard → next → finished) in read-only spectator mode,
+          instead of the old control-panel dashboard. */}
       {activeQuizSession && user?.role === 'teacher' && lobbyCleared && (
-        <QuizControlPanel groupId={currentGroup?._id || activeQuizSession?.quiz?.group}
+        <QuizPlayer
+          sessionId={activeQuizSession._id}
+          spectator
+          onFinish={() => socket.emit('teacher:endQuiz', { sessionId: activeQuizSession._id })}
           onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
-          onStartQuiz={() => { setActiveQuizSession(null); setLobbyCleared(false); handleOpenQuizCreator(); }} />
+        />
       )}
       {activeQuizSession && user?.role === 'student' && !lobbyCleared && (
         <QuizLobby role="student" sessionId={activeQuizSession._id}

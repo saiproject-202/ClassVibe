@@ -2,6 +2,50 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 
+// Avatar Foundation (see AVATAR_FOUNDATION.md) — one wearable item reference: identifier only, never a file path
+const avatarItemSchema = new mongoose.Schema({
+  itemId: { type: String, required: true },
+  variant: { type: String, required: true, default: 'default' }
+}, { _id: false });
+
+// Avatar Foundation — full avatar configuration, embedded on the user (see AVATAR_FOUNDATION.md §4)
+const avatarSchema = new mongoose.Schema({
+  gender: { type: String, enum: ['boy', 'girl'], default: 'boy' },
+  // Curated base-body tone, not a wearable slot — no itemId/design, just a selectable tone (see AVATAR_ART_BIBLE.md §7)
+  skinTone: { type: String, enum: ['warm01', 'warm02', 'warm03', 'warm04', 'warm05', 'warm06'], default: 'warm03' },
+  hair: { type: avatarItemSchema, default: () => ({ itemId: 'spiky01', variant: 'black' }) },
+  eyes: { type: avatarItemSchema, default: () => ({ itemId: 'round01', variant: 'brown' }) },
+  shirt: { type: avatarItemSchema, default: () => ({ itemId: 'crewneck01', variant: 'default' }) },
+  pants: { type: avatarItemSchema, default: () => ({ itemId: 'jeans01', variant: 'default' }) },
+  shoes: { type: avatarItemSchema, default: () => ({ itemId: 'sneaker01', variant: 'default' }) },
+  accessory: { type: avatarItemSchema, default: null },
+  badges: { type: [String], default: [] },
+  background: { type: avatarItemSchema, default: null },
+  favoriteEmote: { type: String, default: null },
+  // Chosen/earned display title shown on the Student Profile (e.g. "Fraction Hero").
+  // Personalization field, same category as favoriteEmote/badges — not tied to a
+  // rewards-award pipeline yet (that's the future Rewards phase), just a slot to hold it.
+  title: { type: String, default: null },
+  // Milestone 10 (Avatar Builder picker UI): itemIds the student has starred in the
+  // picker — purely a display preference, not tied to unlock/equip state.
+  favoriteItems: { type: [String], default: [] },
+  // Milestone 12 (Rewards Locker unlock celebration): itemIds whose badge-gated
+  // cosmetic unlock has already been shown to the student — so the Locker only
+  // celebrates a given unlock once, not every time it's reopened.
+  seenUnlocks: { type: [String], default: [] }
+}, { _id: false });
+
+// Teacher-only profile fields shown on the Teacher Profile screen — additive,
+// all optional/null by default. Not applicable to students.
+const teacherProfileSchema = new mongoose.Schema({
+  subject: { type: String, default: null },
+  gradeRange: { type: String, default: null },
+  school: { type: String, default: null },
+  degree: { type: String, default: null },
+  yearsExperience: { type: Number, default: null },
+  certifications: { type: [String], default: [] }
+}, { _id: false });
+
 /**
  * User Model
  * Supports:
@@ -74,6 +118,18 @@ const userSchema = new mongoose.Schema({
   profilePhoto: {
     type: String,
     default: null
+  },
+
+  // Avatar Foundation — see AVATAR_FOUNDATION.md (no UI/rendering yet, data model only)
+  avatar: {
+    type: avatarSchema,
+    default: () => ({})
+  },
+
+  // Teacher Profile screen fields — only meaningful when role === 'teacher'
+  teacherProfile: {
+    type: teacherProfileSchema,
+    default: () => ({})
   }
 }, {
   timestamps: true  // Adds createdAt and updatedAt automatically

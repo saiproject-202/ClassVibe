@@ -12,8 +12,19 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import socket from '../socket';
+import { SKIN_TONE_SWATCH_HEX } from '../avatarConstants';
 
 const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
+
+// ✅ NEW: read-only labels for the Lobby's Quiz Mode display — never editable here,
+// just reflects whatever was locked in at Quiz Creator time.
+const QUIZ_MODE_LABELS = {
+  individual:    { icon: '👤', label: 'Individual' },
+  team_battle:   { icon: '⚔️', label: 'Team Battle' },
+  random_teams:  { icon: '🎲', label: 'Random Teams' },
+  school_house:  { icon: '🏠', label: 'School House' },
+  custom_teams:  { icon: '🛠', label: 'Custom Teams' }
+};
 
 const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
   const isTeacher = role === 'teacher';
@@ -27,6 +38,9 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
   const [teams, setTeams] = useState([]);
   const [teamRosterCounts, setTeamRosterCounts] = useState({});
   const [myTeamId, setMyTeamId] = useState(null);
+  // ✅ NEW: read-only display of the mode locked in at Quiz Creator time — the Lobby
+  // never changes this, it only shows it and handles team selection accordingly.
+  const [quizMode, setQuizMode] = useState('individual');
   const [allowStudentChoice, setAllowStudentChoice] = useState(true);
   const [teamFullMessage, setTeamFullMessage] = useState('');
   const [quizHasStarted, setQuizHasStarted] = useState(false);
@@ -59,10 +73,12 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
       setTotalQuestions(s.quiz?.questions?.length || 0);
       const teamList = s.teams || [];
       const participantList = (s.participants || []).map(p => ({
-        userId: p.user?._id || p.user, name: p.name || p.user?.name || 'Student', teamId: p.teamId || null
+        userId: p.user?._id || p.user, name: p.name || p.user?.name || 'Student', teamId: p.teamId || null,
+        avatar: p.user?.avatar || null
       }));
       setTeams(teamList);
       setAllowStudentChoice(s.sessionSettings?.allowStudentChoice !== false);
+      setQuizMode(s.sessionSettings?.quizMode || 'individual');
       setParticipants(participantList);
       setTeamRosterCounts(recalcTeamCounts(teamList, participantList));
       if (s.group?.isQuickQuiz) {
@@ -80,12 +96,25 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
   useEffect(() => {
     if (!socket.connected) socket.connect();
 
-    if (isTeacher) {
-      socket.emit('teacher:joinSession', { sessionId });
-      fetchActiveSession();
-    } else {
-      socket.emit('student:joinQuiz', { sessionId });
-    }
+    // ✅ FIX (real-time regression): join the session's socket room, and RE-join on every
+    // reconnect. Socket.IO rooms do NOT survive a reconnect (ping timeout, network blip,
+    // idle, server restart), and nothing here used to re-join — so after any reconnect the
+    // client silently stopped receiving ALL session events (student:joined, team:assigned,
+    // quiz:started, …). That's why the teacher's lobby roster froze at "0 joined" while
+    // students' own lobbies (freshly mounted, still in-room) looked fine, and why a student
+    // sitting in the lobby could miss quiz:started and get stranded until a manual reload.
+    // App.js re-authenticates on 'connect', and the backend emits 'authenticated' after each
+    // (re)auth — so re-joining on 'authenticated' guarantees socket.userId is set first.
+    const joinRoom = () => {
+      if (isTeacher) {
+        socket.emit('teacher:joinSession', { sessionId });
+        fetchActiveSession(); // re-sync roster: catch anyone who joined during the disconnect
+      } else {
+        socket.emit('student:joinQuiz', { sessionId });
+      }
+    };
+    joinRoom();
+    socket.on('authenticated', joinRoom);
 
     const onQuizJoined = (data) => {
       if (data.status === 'completed') {
@@ -100,6 +129,7 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
       setTeams(teamList);
       setMyTeamId(data.myTeamId || null);
       setAllowStudentChoice(data.allowStudentChoice !== false);
+      setQuizMode(data.quizMode || 'individual');
       setParticipants(participantList);
       setTeamRosterCounts(recalcTeamCounts(teamList, participantList));
       if (data.status === 'active') setQuizHasStarted(true);
@@ -108,7 +138,7 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
     const onStudentJoined = (data) => {
       setParticipants(prev => {
         if (prev.find(p => String(p.userId) === String(data.userId))) return prev;
-        return [...prev, { userId: data.userId, name: data.name, teamId: null }];
+        return [...prev, { userId: data.userId, name: data.name, teamId: null, avatar: data.avatar || null }];
       });
     };
 
@@ -136,6 +166,7 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
     socket.on('error', onError);
 
     return () => {
+      socket.off('authenticated', joinRoom);
       socket.off('quiz:joined', onQuizJoined);
       socket.off('student:joined', onStudentJoined);
       socket.off('team:assigned', onTeamAssigned);
@@ -155,9 +186,12 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
     if (teams.length === 0 || myTeamId) onEnterLive();
   }, [quizHasStarted, myTeamId, teams.length, isTeacher, onEnterLive]);
 
+  const [justSelected, setJustSelected] = useState(null);
   const handleSelectTeam = (teamId) => {
     if (isTeacher || !allowStudentChoice) return;
     setTeamFullMessage('');
+    setJustSelected(teamId);
+    setTimeout(() => setJustSelected(null), 300);
     socket.emit('student:selectTeam', { sessionId, teamId });
   };
 
@@ -219,6 +253,12 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
           </p>
         </div>
 
+        {/* ✅ NEW: read-only Quiz Mode label — locked in at Quiz Creator, never editable
+            here. Shown regardless of mode (including plain Individual, no teams). */}
+        <div style={{ ...styles.modeLabel, padding: '12px 20px 0' }}>
+          QUIZ MODE · {QUIZ_MODE_LABELS[quizMode]?.icon || '👤'} {QUIZ_MODE_LABELS[quizMode]?.label || 'Individual'}
+        </div>
+
         {/* Teams */}
         {teams.length > 0 && (
           <div style={styles.section}>
@@ -241,7 +281,9 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
                       ...styles.teamCard,
                       borderColor: isMine ? (team.color || '#4F46E5') : '#e0e0e0',
                       backgroundColor: isMine ? `${team.color || '#4F46E5'}1A` : '#fff',
-                      cursor: clickable ? 'pointer' : 'default'
+                      cursor: clickable ? 'pointer' : 'default',
+                      // ✅ NEW: brief scale-bounce on selection — subtle, not looping
+                      animation: justSelected === team.teamId ? 'teamBounce 0.3s ease' : 'none'
                     }}
                   >
                     <div style={styles.teamCardIcon}>{team.icon || '🏳️'}</div>
@@ -265,12 +307,25 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
             <div style={styles.playersGrid}>
               {participants.map((p, i) => {
                 const team = teams.find(t => t.teamId === p.teamId);
+                // Team color always wins when a team is assigned (identity signal takes
+                // priority); otherwise fall back to the student's own real skin tone, then
+                // the original fixed green when no avatar data is available at all.
+                const avatarColor = team?.color
+                  || (p.avatar?.skinTone && SKIN_TONE_SWATCH_HEX[p.avatar.skinTone])
+                  || '#075E54';
+                const badgeCount = p.avatar?.badges?.length || 0;
                 return (
                   <div key={i} style={{ ...styles.playerChip, borderColor: team?.color || '#e0e0e0' }}>
-                    <div style={{ ...styles.playerAvatar, backgroundColor: team?.color || '#075E54' }}>
-                      {(p.name || 'S').charAt(0).toUpperCase()}
+                    <div style={styles.playerAvatarWrap}>
+                      <div style={{ ...styles.playerAvatar, backgroundColor: avatarColor }}>
+                        {(p.name || 'S').charAt(0).toUpperCase()}
+                      </div>
+                      {badgeCount > 0 && <span style={styles.playerBadgePip}>{badgeCount}</span>}
                     </div>
-                    <span style={styles.playerName}>{p.name}</span>
+                    <div style={styles.playerTextBlock}>
+                      <span style={styles.playerName}>{p.name}</span>
+                      {p.avatar?.title && <span style={styles.playerTitle}>🚀 {p.avatar.title}</span>}
+                    </div>
                     {team && <span style={styles.playerTeamIcon}>{team.icon}</span>}
                   </div>
                 );
@@ -296,6 +351,11 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
         </div>
 
         <style>{`
+          @keyframes teamBounce {
+            0% { transform: scale(1); }
+            40% { transform: scale(1.06); }
+            100% { transform: scale(1); }
+          }
           @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.5; transform: scale(1.2); }
@@ -328,6 +388,7 @@ const styles = {
   statusText: { margin: 0, fontSize: '14px', color: '#666' },
   section: { padding: '20px', borderBottom: '1px solid #e0e0e0' },
   sectionTitle: { margin: '0 0 15px 0', fontSize: '16px', fontWeight: '600', color: '#333' },
+  modeLabel: { fontSize: '11px', fontWeight: 700, letterSpacing: '0.5px', color: '#9CA3AF', marginBottom: '8px' },
   emptyText: { textAlign: 'center', color: '#999', fontSize: '14px', padding: '10px' },
   teamGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' },
   teamCard: { padding: '14px', borderRadius: '12px', border: '2px solid #e0e0e0', textAlign: 'center', transition: 'all 0.15s', position: 'relative' },
@@ -338,8 +399,12 @@ const styles = {
   teamFullMsg: { marginTop: '12px', fontSize: '13px', color: '#DC2626', textAlign: 'center' },
   playersGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '10px', maxHeight: '220px', overflowY: 'auto' },
   playerChip: { display: 'flex', alignItems: 'center', gap: '8px', padding: '10px', backgroundColor: '#fff', borderRadius: '8px', border: '1px solid #e0e0e0' },
-  playerAvatar: { width: '30px', height: '30px', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '600', flexShrink: 0 },
-  playerName: { flex: 1, fontSize: '13px', fontWeight: '500', color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  playerAvatarWrap: { position: 'relative', flexShrink: 0 },
+  playerAvatar: { width: '30px', height: '30px', borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: '600' },
+  playerBadgePip: { position: 'absolute', bottom: -2, right: -2, minWidth: '14px', height: '14px', borderRadius: '7px', backgroundColor: '#1E1B3A', color: 'white', fontSize: '9px', fontWeight: '700', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px', border: '1.5px solid #fff' },
+  playerTextBlock: { flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 },
+  playerName: { fontSize: '13px', fontWeight: '500', color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  playerTitle: { fontSize: '10px', fontWeight: '600', color: '#B45309', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   playerTeamIcon: { fontSize: '13px' },
   footer: { padding: '15px 20px', borderTop: '1px solid #e0e0e0', backgroundColor: '#f8f9fa' },
   waitingIndicator: { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },

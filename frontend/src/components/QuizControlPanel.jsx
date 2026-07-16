@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import socket from '../socket';
+import LbAvatar from './LbAvatar';
+import { CELEBRATION_EMOTES } from '../avatarConstants';
 
 const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
 
@@ -19,6 +21,15 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
   const [participants, setParticipants] = useState([]);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [leaderboard, setLeaderboard] = useState([]);
+  // ✅ NEW: this panel never tracked any of these — teacher's "finished" state was
+  // effectively blank (no team leaderboard, no awards, no per-question stats).
+  const [teamLeaderboard, setTeamLeaderboard] = useState([]);
+  // Milestone 11: read-only mirror of QuizPlayer's celebration choices —
+  // { [userId]: emote }. Teacher never gets a picker, only ever watches.
+  const [celebrationChoices, setCelebrationChoices] = useState({});
+  const [questionMVP, setQuestionMVP] = useState(null);
+  const [questionStats, setQuestionStats] = useState(null);
+  const [awards, setAwards] = useState([]);
   const [totalPoints, setTotalPoints] = useState(0);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -66,11 +77,22 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
   // ✅ NEW: join the quiz session's socket room. Without this, the server's
   // io.to(sessionId).emit(...) broadcasts (next question, finished, etc.) never
   // reach this panel at all, no matter what it listens for below.
+  // ✅ FIX (real-time regression): also RE-join on every reconnect. Socket.IO rooms don't
+  // survive a reconnect (ping timeout, blip, server restart), and this used to join only
+  // once — so after any reconnect the teacher's live panel silently stopped receiving
+  // answers, leaderboard updates, next-question and finished broadcasts. Re-joining on
+  // 'authenticated' (fired by the backend after App.js re-auths on 'connect') also
+  // re-runs fetchActiveQuiz to catch up on state missed during the disconnect.
   useEffect(() => {
-    if (activeSession?._id) {
+    if (!activeSession?._id) return;
+    const joinRoom = () => {
       socket.emit('teacher:joinSession', { sessionId: activeSession._id });
-    }
-  }, [activeSession?._id]);
+      fetchActiveQuiz();
+    };
+    joinRoom();
+    socket.on('authenticated', joinRoom);
+    return () => socket.off('authenticated', joinRoom);
+  }, [activeSession?._id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Fetch quiz history ────────────────────────────────────────────
   const fetchHistory = useCallback(async () => {
@@ -120,11 +142,24 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
 
     const onLeaderboardUpdate = (data) => {
       setLeaderboard(data.leaderboard || []);
+      setTeamLeaderboard(data.teamLeaderboard || []); // ✅ NEW
+      setQuestionMVP(data.questionMVP || null); // ✅ NEW
       // Sync scores
       setParticipants(prev => prev.map(p => {
         const entry = (data.leaderboard || []).find(l => l.userId === p.userId);
         return entry ? { ...p, score: entry.score, streak: entry.streak || 0 } : p;
       }));
+    };
+
+    // ✅ NEW: "Question Summary" beat, same pacing the student view gets — useful when
+    // a teacher is presenting on a projector.
+    const onQuestionSummary = (data) => {
+      setQuestionStats(data);
+    };
+
+    // ✅ NEW: arrives shortly after quiz:finished once results are saved
+    const onAwardsRevealed = (data) => {
+      setAwards(data.awards || []);
     };
 
     // ✅ FIXED: was only listening for the dead 'quizBegan' name — the real event
@@ -140,12 +175,32 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
       setCurrentQuestionIndex(data.questionIndex || 0);
       // Reset answered flags
       setParticipants(prev => prev.map(p => ({ ...p, lastAnswered: null })));
+      setQuestionStats(null); // ✅ NEW: clear previous question's summary
       setActionLoading(false);
     };
 
-    const onQuizEnded = () => {
+    // ✅ FIXED: used to ignore its own payload entirely — the teacher's "finished"
+    // state showed no final leaderboard at all until they switched to the History tab.
+    const onQuizEnded = (data) => {
       setQuizStatus('finished');
+      if (data?.leaderboard) {
+        setLeaderboard(data.leaderboard);
+        // Milestone 11: seed already-chosen celebrations (rare on this panel since
+        // the teacher's view usually renders first, but harmless if it happens).
+        const seeded = {};
+        data.leaderboard.forEach(entry => {
+          if (entry.celebrationEmote) seeded[entry.userId] = entry.celebrationEmote;
+        });
+        setCelebrationChoices(seeded);
+      }
+      setTeamLeaderboard(data?.teamLeaderboard || []); // ✅ NEW
       setActionLoading(false);
+    };
+
+    // Milestone 11: live update as each top-3 finisher confirms their celebration
+    const onCelebrationChosen = (data) => {
+      if (!data?.userId) return;
+      setCelebrationChoices(prev => ({ ...prev, [data.userId]: data.emote }));
     };
 
     // ✅ NEW: surface server-side rejections (e.g. "Only host can control quiz")
@@ -161,11 +216,14 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
     socket.on('answer:submitted', onAnswerReceived);
     socket.on('leaderboard:update', onLeaderboardUpdate);
     socket.on('leaderboard:show', onLeaderboardUpdate);
+    socket.on('question:summary', onQuestionSummary); // ✅ NEW
+    socket.on('quiz:awardsRevealed', onAwardsRevealed); // ✅ NEW
     socket.on('quiz:started', onQuizBegan);
     socket.on('quizBegan', onQuizBegan); // legacy alias, harmless if unused
     socket.on('quiz:nextQuestion', onNextQuestion);
     socket.on('quiz:finished', onQuizEnded);
     socket.on('quizEnded', onQuizEnded);
+    socket.on('celebration:chosen', onCelebrationChosen); // Milestone 11
     socket.on('error', onError);
 
     return () => {
@@ -175,11 +233,14 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
       socket.off('answer:submitted', onAnswerReceived);
       socket.off('leaderboard:update', onLeaderboardUpdate);
       socket.off('leaderboard:show', onLeaderboardUpdate);
+      socket.off('question:summary', onQuestionSummary);
+      socket.off('quiz:awardsRevealed', onAwardsRevealed);
       socket.off('quiz:started', onQuizBegan);
       socket.off('quizBegan', onQuizBegan);
       socket.off('quiz:nextQuestion', onNextQuestion);
       socket.off('quiz:finished', onQuizEnded);
       socket.off('quizEnded', onQuizEnded);
+      socket.off('celebration:chosen', onCelebrationChosen);
       socket.off('error', onError);
     };
   }, []);
@@ -449,21 +510,159 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
               </div>
             )}
 
+            {/* ── Question Summary (while active) ─────────────────
+                ✅ NEW: same educational beat the students see, useful when a teacher
+                is presenting on a projector — pacing parity, not a full replica. */}
+            {quizStatus === 'active' && questionStats && (
+              <div style={S.section}>
+                <h3 style={S.sectionTitle}>📈 Question Summary</h3>
+                <div style={S.qSummaryRow}>
+                  <div style={S.qSummaryStat}>
+                    <div style={S.qSummaryValue}>{questionStats.correctPercent}%</div>
+                    <div style={S.qSummaryLabel}>Correct</div>
+                  </div>
+                  <div style={S.qSummaryStat}>
+                    <div style={S.qSummaryValue}>{questionStats.avgTimeTaken}s</div>
+                    <div style={S.qSummaryLabel}>Avg time</div>
+                  </div>
+                </div>
+                {questionStats.fastestCorrect && (
+                  <p style={S.qSummaryFastest}>⚡ Fastest: {questionStats.fastestCorrect.name} ({questionStats.fastestCorrect.timeTaken}s)</p>
+                )}
+              </div>
+            )}
+
             {/* ── Live leaderboard (while active) ──────────────── */}
-            {quizStatus === 'active' && leaderboard.length > 0 && (
+            {quizStatus === 'active' && (leaderboard.length > 0 || teamLeaderboard.length > 0) && (
               <div style={S.section}>
                 <h3 style={S.sectionTitle}>🏆 Live Rankings</h3>
-                {leaderboard.slice(0, 5).map((entry, i) => (
-                  <div key={i} style={S.lbRow}>
-                    <div style={S.lbRank}>
-                      {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                {/* ✅ NEW: MVP callout, matching the student view */}
+                {questionMVP && (
+                  <p style={S.mvpCallout}>⭐ Question MVP: <strong>{questionMVP.name}</strong> (+{questionMVP.points} pts)</p>
+                )}
+                {/* ✅ NEW: team leaderboard — this panel previously only ever showed the
+                    flat individual list, even in team mode. */}
+                {teamLeaderboard.length > 0 ? (
+                  teamLeaderboard.slice(0, 5).map((team, i) => (
+                    <div key={team.teamId} style={S.lbRow}>
+                      <div style={S.lbRank}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</div>
+                      <div style={S.lbName}>{team.icon} {team.name}</div>
+                      <div style={S.lbScore}>{team.averageScore} avg</div>
                     </div>
-                    <div style={S.lbName}>{entry.name || 'Student'}</div>
-                    <div style={S.lbScore}>{entry.score} pts</div>
-                    {entry.streak > 0 && <div style={S.lbStreak}>🔥 {entry.streak}</div>}
-                  </div>
-                ))}
+                  ))
+                ) : (
+                  leaderboard.slice(0, 5).map((entry, i) => (
+                    <div key={i} style={S.lbRow}>
+                      <div style={S.lbRank}>
+                        {i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}
+                      </div>
+                      <LbAvatar name={entry.name} avatar={entry.avatar} size={22} />
+                      <div style={S.lbName}>{entry.name || 'Student'}</div>
+                      <div style={S.lbScore}>{entry.score} pts</div>
+                      {entry.streak > 0 && <div style={S.lbStreak}>🔥 {entry.streak}</div>}
+                    </div>
+                  ))
+                )}
               </div>
+            )}
+
+            {/* ── Finished: two distinct endings, matching the student view ──────
+                ✅ NEW: this body was completely empty before — teacher had to switch
+                to the History tab to see any result at all once a quiz ended. */}
+            {quizStatus === 'finished' && (
+              <>
+                {/* ✅ CHANGED (Milestone 11): universal podium — top-3 individual
+                    finishers, same as QuizPlayer, in every mode. Team mode's
+                    distinct signal moves to the column-wise standings below,
+                    replacing the old single-team "winning team" hero. */}
+                {leaderboard.length > 0 && (() => {
+                  const podiumTop3 = leaderboard.slice(0, 3);
+                  return (
+                    <div style={S.podiumSection}>
+                      <div style={S.celebrationLabel}>🏆 PODIUM</div>
+                      <div style={S.podiumRow}>
+                        {[podiumTop3[1], podiumTop3[0], podiumTop3[2]].map((entry, i) => {
+                          if (!entry) return <div key={i} style={S.podiumSlotEmpty} />;
+                          const place = entry === podiumTop3[0] ? 1 : entry === podiumTop3[1] ? 2 : 3;
+                          const placeColor = place === 1 ? '#F59E0B' : place === 2 ? '#9CA3AF' : '#B45309';
+                          const chosen = celebrationChoices[entry.userId];
+                          const chosenMeta = chosen && CELEBRATION_EMOTES.find(e => e.key === chosen);
+                          return (
+                            <div key={entry.userId} style={S.podiumSlot}>
+                              <div style={{ marginBottom: '8px', position: 'relative' }}>
+                                <LbAvatar name={entry.name} avatar={entry.avatar} color={placeColor} size={56} />
+                                {chosenMeta && <span style={S.podiumEmoteBadge} title={chosenMeta.label}>{chosenMeta.icon}</span>}
+                              </div>
+                              <div style={S.podiumName}>{entry.name}</div>
+                              <div style={{ ...S.podiumStand, height: place === 1 ? '60px' : place === 2 ? '42px' : '30px', backgroundColor: placeColor }}>
+                                <span style={S.podiumPlace}>{place}</span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Milestone 11: column-wise team standings, replacing the old
+                    single-team hero card — every team ranked, side by side. */}
+                {teamLeaderboard.length > 0 && (
+                  <div style={S.teamColumnsRow}>
+                    {teamLeaderboard.map((team) => (
+                      <div key={team.teamId} style={{ ...S.teamColumn, borderColor: team.color || '#4F46E5' }}>
+                        <div style={S.teamColumnHeader}>#{team.rank} {team.icon} {team.name}</div>
+                        <div style={S.teamColumnScore}>{team.averageScore} avg pts</div>
+                        <div style={S.teamColumnMembers}>
+                          {(team.members || []).map((m) => (
+                            <div key={m.userId} style={S.teamColumnMemberRow}>
+                              <LbAvatar name={m.name} avatar={m.avatar} size={20} />
+                              <span style={S.teamColumnMemberName}>{m.name}</span>
+                              <span style={S.teamColumnMemberScore}>{m.score}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {awards.length > 0 && (
+                  <div style={S.section}>
+                    <h3 style={S.sectionTitle}>🏅 Class Highlights</h3>
+                    {awards.map((award, i) => (
+                      <div key={i} style={S.lbRow}>
+                        <div style={S.lbName}>{award.name}</div>
+                        <div style={S.lbScore}>{award.value}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={S.section}>
+                  <h3 style={S.sectionTitle}>🏆 Final Leaderboard</h3>
+                  {teamLeaderboard.length > 0 ? (
+                    teamLeaderboard.map((team, i) => (
+                      <div key={team.teamId} style={S.lbRow}>
+                        <div style={S.lbRank}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</div>
+                        <div style={S.lbName}>{team.icon} {team.name}</div>
+                        <div style={S.lbScore}>{team.averageScore} avg</div>
+                      </div>
+                    ))
+                  ) : (
+                    leaderboard.map((entry, i) => (
+                      <div key={i} style={S.lbRow}>
+                        <div style={S.lbRank}>{i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `#${i + 1}`}</div>
+                        <LbAvatar name={entry.name} avatar={entry.avatar} size={22} />
+                        <div style={S.lbName}>{entry.name || 'Student'}</div>
+                        <div style={S.lbScore}>{entry.score} pts</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div style={S.savedNote}>✓ Saved to Quiz History</div>
+              </>
             )}
 
             {/* ── Questions list preview ────────────────────────── */}
@@ -865,6 +1064,45 @@ const S = {
   lbName: { flex: 1, fontSize: 14, fontWeight: 500, color: '#333' },
   lbScore: { fontSize: 15, fontWeight: 700, color: '#4F46E5' },
   lbStreak: { fontSize: 13, color: '#FFA500', fontWeight: 600 },
+
+  // ✅ NEW: Question Summary flash (teacher, while active)
+  qSummaryRow: { display: 'flex', gap: 10, marginBottom: 10 },
+  qSummaryStat: { flex: 1, textAlign: 'center', padding: '12px', backgroundColor: '#F9FAFB', borderRadius: 10, border: '1px solid #eee' },
+  qSummaryValue: { fontSize: 22, fontWeight: 800, color: '#4F46E5' },
+  qSummaryLabel: { fontSize: 11, color: '#6B7280', fontWeight: 600, marginTop: 2 },
+  qSummaryFastest: { fontSize: 12, color: '#92400E', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', borderRadius: 8, padding: '8px 12px', margin: 0 },
+  mvpCallout: { fontSize: 13, color: '#92400E', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', borderRadius: 8, padding: '8px 12px', marginBottom: 10 },
+
+  // ✅ NEW: shared avatar placeholder — colored circle + initial, same pattern used
+  // everywhere else in the app; the exact spot a full-body avatar replaces later.
+  avatarPlaceholderCircle: { width: 40, height: 40, borderRadius: '50%', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, fontWeight: 700, flexShrink: 0 },
+  avatarPlaceholderRow: { display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap', marginTop: 12 },
+
+  // ✅ NEW: finished-state Individual Podium / Team celebration (teacher)
+  celebrationLabel: { fontSize: 11, fontWeight: 700, letterSpacing: 1, color: '#9CA3AF', marginBottom: 12, textAlign: 'center' },
+  podiumSection: { textAlign: 'center', marginBottom: 20, padding: 18, backgroundColor: '#F9FAFB', borderRadius: 14 },
+  podiumRow: { display: 'flex', alignItems: 'flex-end', justifyContent: 'center', gap: 12 },
+  podiumSlot: { display: 'flex', flexDirection: 'column', alignItems: 'center', width: 80 },
+  podiumSlotEmpty: { width: 80 },
+  podiumAvatar: { width: 48, height: 48, fontSize: 18, marginBottom: 6 },
+  podiumName: { fontSize: 12, fontWeight: 600, color: '#1a1a1a', marginBottom: 6, maxWidth: 80, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  podiumStand: { width: '100%', borderRadius: '6px 6px 0 0', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', paddingTop: 6 },
+  podiumPlace: { fontSize: 15, fontWeight: 800, color: 'white' },
+  // Milestone 11: emote badge on a podium finisher's avatar + column-wise team standings
+  podiumEmoteBadge: { position: 'absolute', bottom: -4, right: -4, fontSize: 14, backgroundColor: 'white', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 3px rgba(0,0,0,0.2)' },
+  teamColumnsRow: { display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 16 },
+  teamColumn: { flex: '1 1 140px', minWidth: 140, borderRadius: 10, borderWidth: 2, borderStyle: 'solid', padding: 10, backgroundColor: '#F9FAFB' },
+  teamColumnHeader: { fontSize: 13, fontWeight: 700, color: '#1a1a1a', marginBottom: 4 },
+  teamColumnScore: { fontSize: 11, color: '#6B7280', fontWeight: 600, marginBottom: 6 },
+  teamColumnMembers: { display: 'flex', flexDirection: 'column', gap: 5 },
+  teamColumnMemberRow: { display: 'flex', alignItems: 'center', gap: 5 },
+  teamColumnMemberName: { fontSize: 11, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+  teamColumnMemberScore: { fontSize: 11, fontWeight: 700, color: '#4F46E5' },
+  teamCelebrationCard: { textAlign: 'center', marginBottom: 20, padding: '20px 16px', backgroundColor: '#F9FAFB', borderRadius: 14 },
+  teamCelebrationIcon: { fontSize: 32, marginBottom: 4 },
+  teamCelebrationName: { fontSize: 18, fontWeight: 800, color: '#1a1a1a' },
+  teamCelebrationScore: { fontSize: 13, color: '#6B7280', fontWeight: 600, marginTop: 4 },
+  savedNote: { textAlign: 'center', fontSize: 12, color: '#25D366', fontWeight: 600, marginTop: 4 },
 
   questionsList: { display: 'flex', flexDirection: 'column', gap: 8 },
   questionItem: { display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, backgroundColor: '#f8f9fa', borderRadius: 8, border: '1px solid #eee' },
