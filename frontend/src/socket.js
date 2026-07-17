@@ -11,8 +11,16 @@ const socket = io(SOCKET_URL, {
   withCredentials: true,
   autoConnect: false,
   reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 2000,
+  // ✅ FIX (production sync): never give up reconnecting. The backend runs on a free
+  // tier that spins down when idle and can take 30-60s to cold-start; the old cap of
+  // 5 attempts × 2s meant the socket permanently gave up after ~10s and only a full
+  // page reload could revive it (this was the root of "teacher lobby / chat / quiz not
+  // updating until I reload"). With infinite retries + a capped backoff it keeps trying
+  // and auto-recovers the moment the server is back — and the app re-joins its rooms on
+  // the 'authenticated' event that follows each reconnect (see App.js + the quiz views).
+  reconnectionAttempts: Infinity,
+  reconnectionDelay: 1000,
+  reconnectionDelayMax: 5000,
   timeout: 20000,
 });
 

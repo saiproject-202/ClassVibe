@@ -22,7 +22,7 @@ import QuizCreator from './components/QuizCreator';
 import StudentAnalytics from './components/StudentAnalytics';
 import './App.css';
 import QuizLobby from './components/QuizLobby';
-// import QuizControlPanel from './components/QuizControlPanel';
+import QuizControlPanel from './components/QuizControlPanel';
 import QuizPlayer from './components/QuizPlayer';
 import AvatarBuilder from './components/AvatarBuilder';
 import TeacherProfile from './components/TeacherProfile';
@@ -511,7 +511,21 @@ function App() {
           if (t) socket.emit('authenticate', t);
         };
         socket.on('connect', reAuth);
+        // ✅ FIX (production sync): re-join the current classroom room after every
+        // reconnect. Socket.IO rooms don't survive a reconnect, and this used to only
+        // ever emit joinGroup when you FIRST opened a classroom — so after a reconnect
+        // the socket was authenticated but no longer in the group room, and chat /
+        // presence / quiz-start notifications silently stopped arriving until a reload.
+        // Gated on 'authenticated' (not raw 'connect') so socket.userId is set first,
+        // matching how the quiz views re-join their session rooms.
+        const reJoinGroup = () => {
+          const g = currentGroupRef.current;
+          if (g) socket.emit('joinGroup', g._id ?? g.id);
+        };
+        socket.on('authenticated', reJoinGroup);
         loadGroups(parsedUser?.role === 'teacher');
+        // Cleanup returned from inside the try so it closes over reAuth/reJoinGroup.
+        return () => { socket.off('connect', reAuth); socket.off('authenticated', reJoinGroup); };
       } catch (err) {
         console.error('Error restoring session:', err);
         localStorage.removeItem('token'); localStorage.removeItem('user');
@@ -519,7 +533,6 @@ function App() {
     } else {
       setAuthScreen(pinFromUrl ? 'student' : 'home');
     }
-    return () => socket.off('connect');
   }, [loadGroups]);
 
   useEffect(() => {
@@ -1526,7 +1539,7 @@ function App() {
                     <h3 style={D.rightTitle}>Quick Resource Tools</h3>
                     <div style={D.toolCard} onClick={quickQuizLoading ? undefined : handleOpenQuizCreator}>
                       <span style={D.toolIconBox}>📝</span>
-                      <div style={D.toolInfo}><div style={D.toolName}>Create New Quiz</div><div style={D.toolDesc}>{quickQuizLoading ? 'Starting...' : 'Build questions & assign to classes'}</div></div>
+                      <div style={D.toolInfo}><div style={D.toolName}>Instant Quiz</div><div style={D.toolDesc}>{quickQuizLoading ? 'Starting...' : 'Build questions & assign to classes'}</div></div>
                       <span style={D.toolArrow}>↗</span>
                     </div>
                     <div style={D.toolCard} onClick={() => setShowSchedule(true)}>

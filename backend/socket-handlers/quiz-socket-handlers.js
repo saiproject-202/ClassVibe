@@ -24,6 +24,19 @@ const activeQuizTimers = new Map();
 // top-3 finisher can pick on the Final Results podium.
 const ALLOWED_CELEBRATION_EMOTES = ['celebrate', 'clap', 'wave', 'victory', 'thankYou', 'teamRespect'];
 
+// ✅ Score scaling: teachers author small per-question weights (10/15/25…), but final
+// leaderboard scores should feel substantial (a full quiz lands in the low thousands).
+// This multiplier scales the DISPLAYED and AWARDED points identically, and is applied to
+// the max-score/percentage baselines too — so absolute scores grow ~20×, while accuracy
+// percentages, speed multipliers, and team normalization all stay unchanged. Tune here.
+const POINTS_MULTIPLIER = 20;
+// Effective points for one question (raw author weight × the display/award multiplier).
+const scaledPoints = (q) => ((q && q.points) || 10) * POINTS_MULTIPLIER;
+// A question object with its DISPLAY `points` scaled to match what's actually awarded —
+// used in the quiz:joined snapshots so a reload mid-question shows the same big number
+// students see on a fresh question. Handles both Mongoose subdocs and plain objects.
+const scaledQuestion = (q) => ({ ...(q && q.toObject ? q.toObject() : q), points: scaledPoints(q) });
+
 /**
  * Setup quiz-related socket event handlers
  */
@@ -65,7 +78,7 @@ function setupQuizSocketHandlers(io, socket) {
         status:          session.status,
         totalQuestions:  session.quiz.questions.length,
         currentQuestion: session.status === 'active'
-          ? { questionIndex: session.currentQuestionIndex, question: session.quiz.questions[session.currentQuestionIndex] }
+          ? { questionIndex: session.currentQuestionIndex, question: scaledQuestion(session.quiz.questions[session.currentQuestionIndex]) }
           : null,
         timeRemaining,
         teams:           session.teams || [],
@@ -142,7 +155,7 @@ function setupQuizSocketHandlers(io, socket) {
           questionText: firstQuestion.questionText,
           options:      firstQuestion.options,
           timeLimit:    questionTimeLimit,
-          points:       firstQuestion.points || 10,
+          points:       scaledPoints(firstQuestion),
           questionType: firstQuestion.questionType || 'multiple_choice'
         },
         totalQuestions: session.quiz.questions.length
@@ -198,7 +211,7 @@ function setupQuizSocketHandlers(io, socket) {
           questionText: nextQuestion.questionText,
           options:      nextQuestion.options,
           timeLimit:    questionTimeLimit,
-          points:       nextQuestion.points || 10,
+          points:       scaledPoints(nextQuestion),
           questionType: nextQuestion.questionType || 'multiple_choice'
         },
         totalQuestions: session.quiz.questions.length
@@ -396,7 +409,7 @@ function setupQuizSocketHandlers(io, socket) {
         currentQuestion: session.status === 'active'
           ? {
               questionIndex: session.currentQuestionIndex,
-              question:      session.quiz.questions[session.currentQuestionIndex]
+              question:      scaledQuestion(session.quiz.questions[session.currentQuestionIndex])
             }
           : null,
         // ✅ FIXED: actual timeRemaining, not hardcoded 30
@@ -438,7 +451,7 @@ function setupQuizSocketHandlers(io, socket) {
             questionText: currentQ.questionText,
             options:      currentQ.options,
             timeLimit:    currentQ.timeLimit || 45,
-            points:       currentQ.points || 10,
+            points:       scaledPoints(currentQ),
             questionType: currentQ.questionType || 'multiple_choice'
           },
           totalQuestions: session.quiz.questions.length
@@ -628,7 +641,7 @@ function setupQuizSocketHandlers(io, socket) {
         isCorrect = selectedAnswer === question.correctAnswer;
       }
 
-      const basePoints   = question.points || 10;
+      const basePoints   = scaledPoints(question);
       const timeLimit    = question.timeLimit || 45;
       const timeRemaining = timeLimit - (timeTaken || 0);
 
@@ -847,7 +860,7 @@ async function handleQuestionComplete(io, session, questionIndex) {
     // ✅ NEW: reveal correct/wrong to EVERY participant at the same moment — when the
     // timer ends — instead of the old behavior where each student found out the
     // instant they personally submitted, before anyone else had even answered.
-    const basePoints = question.points || 10;
+    const basePoints = scaledPoints(question);
     for (const participant of updatedSession.participants) {
       const answerEntry = participant.answers.find(a => a.questionIndex === questionIndex);
       if (!answerEntry) continue;
@@ -920,7 +933,7 @@ async function handleQuestionComplete(io, session, questionIndex) {
                 questionText: nextQuestion.questionText,
                 options:      nextQuestion.options,
                 timeLimit:    questionTimeLimit,
-                points:       nextQuestion.points || 10,
+                points:       scaledPoints(nextQuestion),
                 questionType: nextQuestion.questionType || 'multiple_choice'
               },
               totalQuestions: updatedSession.quiz.questions.length
@@ -994,7 +1007,7 @@ function assignToSmallestTeam(session, participant) {
 function getTeamLeaderboard(session, quiz, avatarByUserId = {}) {
   if (!session.teams || session.teams.length === 0) return [];
 
-  const maxPossibleScore = quiz.getTotalPoints() || 1;
+  const maxPossibleScore = (quiz.getTotalPoints() * POINTS_MULTIPLIER) || 1;
 
   const rows = session.teams.map(team => {
     const members = session.participants.filter(p => p.teamId === team.teamId);
@@ -1011,7 +1024,7 @@ function getTeamLeaderboard(session, quiz, avatarByUserId = {}) {
       if (correct.length === 0) return 0;
       const multipliers = correct.map(a => {
         const q = quiz.questions[a.questionIndex];
-        const basePoints = (q && q.points) || 10;
+        const basePoints = scaledPoints(q);
         return basePoints > 0 ? a.points / basePoints : 1;
       });
       return multipliers.reduce((a, b) => a + b, 0) / multipliers.length;
@@ -1219,7 +1232,7 @@ async function finalizeQuizSession(io, session, leaderboard) {
       return;
     }
 
-    const maxScore = quiz.getTotalPoints();
+    const maxScore = quiz.getTotalPoints() * POINTS_MULTIPLIER;
     const totalQuestions = quiz.questions.length;
     const rankByUserId = new Map(
       (leaderboard || []).map(entry => [entry.userId.toString(), entry.rank])
