@@ -22,7 +22,7 @@ import QuizCreator from './components/QuizCreator';
 import StudentAnalytics from './components/StudentAnalytics';
 import './App.css';
 import QuizLobby from './components/QuizLobby';
-import QuizControlPanel from './components/QuizControlPanel';
+//import QuizControlPanel from './components/QuizControlPanel';
 import QuizPlayer from './components/QuizPlayer';
 import AvatarBuilder from './components/AvatarBuilder';
 import TeacherProfile from './components/TeacherProfile';
