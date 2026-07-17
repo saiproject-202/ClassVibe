@@ -66,14 +66,21 @@ const FloatingQuizButton = ({
   useEffect(() => {
     if (!socket || !groupId) return;
 
+    // ✅ FIX: socket payloads carry `sessionId` (and sometimes a nested `session`), but
+    // NOT a top-level `_id`. App.js stores whatever we pass here as `activeQuizSession`
+    // and the Lobby/Player read `activeQuizSession._id` — so without this normalization a
+    // student who clicked the button after only a socket event (never a REST fetch) got
+    // `_id: undefined` and the lobby silently failed to open. Guarantee `_id` is always set.
+    const withId = (data) => ({ ...data, _id: data._id || data.sessionId || data.session?._id });
+
     const onQuizStarted = (data) => {
-      setQuizSession({ status: 'waiting', ...data });
+      setQuizSession({ status: 'waiting', ...withId(data) });
       setPulse(true);
       setTimeout(() => setPulse(false), 2500);
     };
 
     const onQuizBegan = (data) => {
-      setQuizSession(prev => prev ? { ...prev, status: 'active' } : { status: 'active', ...data });
+      setQuizSession(prev => prev ? { ...prev, status: 'active' } : { status: 'active', ...withId(data) });
     };
 
     const onQuizEnded = () => {
@@ -89,21 +96,40 @@ const FloatingQuizButton = ({
       });
     };
 
+    // ✅ FIX: the backend's actual completion event is 'quiz:finished' (see teacher:endQuiz
+    // / the auto-complete path in quiz-socket-handlers.js) — 'quiz:ended'/'quizEnded' are
+    // never emitted by anything, so this button never learned a quiz had ended and could
+    // keep showing a stale "LIVE"/"Waiting" state indefinitely.
+    const onQuizFinished = () => setQuizSession(null);
+
     socket.on('quiz:started', onQuizStarted);
     socket.on('quizStarted', onQuizStarted);     // backend may emit either name
     socket.on('quizBegan', onQuizBegan);
     socket.on('quiz:ended', onQuizEnded);
     socket.on('quizEnded', onQuizEnded);
+    socket.on('quiz:finished', onQuizFinished);
     socket.on('participantJoined', onParticipantJoined);
 
     checkActiveQuiz();
 
+    // ✅ FIX (real-time reliability): this used to only ever sync from the server ONCE, on
+    // mount — after that it trusted socket events alone forever. Any single missed/dropped
+    // event (a reconnect gap, an event fired to a room this socket wasn't in, a race right
+    // as the teacher recreated the quiz) left the button permanently stale until a full
+    // page reload — exactly the "clicked the button and the lobby didn't open correctly"
+    // symptom (a stale session id led nowhere). This periodic re-sync is a self-healing
+    // safety net: even in the worst case, the button can never be more than ~15s out of
+    // sync with the real active session, independent of any specific event being missed.
+    const pollInterval = setInterval(checkActiveQuiz, 15000);
+
     return () => {
+      clearInterval(pollInterval);
       socket.off('quiz:started', onQuizStarted);
       socket.off('quizStarted', onQuizStarted);
       socket.off('quizBegan', onQuizBegan);
       socket.off('quiz:ended', onQuizEnded);
       socket.off('quizEnded', onQuizEnded);
+      socket.off('quiz:finished', onQuizFinished);
       socket.off('participantJoined', onParticipantJoined);
     };
   }, [socket, groupId, checkActiveQuiz]);
@@ -172,7 +198,8 @@ const FloatingQuizButton = ({
     const sid = session?._id || session?.sessionId;
     if (!sid) return;
     socket.emit('student:joinQuiz', { sessionId: sid });
-    if (onJoinQuiz) onJoinQuiz(session);
+    // Always hand App.js a session that HAS `_id` (Lobby reads activeQuizSession._id).
+    if (onJoinQuiz) onJoinQuiz({ ...session, _id: sid });
   }, [socket, onJoinQuiz]);
 
   // ── Listen for waitingRoom open event from ChatArea (the chat notification's
@@ -198,7 +225,8 @@ const FloatingQuizButton = ({
       // Teacher: open the Lobby (or straight to live control if already active) if a
       // quiz exists, else open the quiz builder
       if (quizSession) {
-        onOpenLobby?.(quizSession);
+        const sid = quizSession._id || quizSession.sessionId;
+        onOpenLobby?.({ ...quizSession, _id: sid });
       } else {
         onCreateQuiz?.(null);
       }

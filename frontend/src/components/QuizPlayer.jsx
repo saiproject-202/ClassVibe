@@ -330,14 +330,19 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
       setMyRank(myRankData ? myRankData.rank : null);
       setCurrentView('leaderboard');
 
-      // ✅ NEW: "Countdown" beat — self-driven, no server event. Duration matches the
-      // server's actual pre-next-question delay (see quiz-socket-handlers.js). Guarded
-      // by currentViewRef so a fast quiz:nextQuestion/quiz:finished arrival can't be
-      // clobbered by this stale timeout firing after we've already moved on.
-      setCountdownSeconds(3);
+      // ✅ NEW: "Countdown" beat — self-driven, no server event. The server now tells us
+      // exactly how long the whole leaderboard beat is (`nextIn`) and how long the "3…2…1"
+      // tail should be (`countdownMs`), so we show the leaderboard for the bulk of it and
+      // only flip to the countdown for the final few seconds — staying perfectly in sync
+      // with the server's real pre-next-question timer even after these were made longer.
+      // Guarded by currentViewRef so a fast quiz:nextQuestion/quiz:finished arrival can't
+      // be clobbered by this stale timeout firing after we've already moved on.
+      const nextIn = data.nextIn || 6000;
+      const countdownMs = data.countdownMs || 3000;
+      setCountdownSeconds(Math.max(1, Math.round(countdownMs / 1000)));
       setTimeout(() => {
         if (currentViewRef.current === 'leaderboard') setCurrentView('countdown');
-      }, 3000);
+      }, Math.max(0, nextIn - countdownMs));
     });
 
     // ✅ NEW (Phase 5.1): live team momentum bar, recomputed after every answer and

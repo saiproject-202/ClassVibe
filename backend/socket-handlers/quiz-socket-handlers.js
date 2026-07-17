@@ -32,6 +32,16 @@ const ALLOWED_CELEBRATION_EMOTES = ['celebrate', 'clap', 'wave', 'victory', 'tha
 const POINTS_MULTIPLIER = 20;
 // Effective points for one question (raw author weight × the display/award multiplier).
 const scaledPoints = (q) => ((q && q.points) || 10) * POINTS_MULTIPLIER;
+
+// ✅ Question-cycle pacing (ms) — how long each between-questions beat is shown before the
+// next one. Deliberately relaxed (not "hurry-burry") so every student and the watching
+// teacher get a full look at the answer reveal, the class stats, and the leaderboard.
+// The reveal chain is: Answer Reveal → Question Summary → Leaderboard (+ short countdown)
+// → next question. Tune these three numbers to speed up / slow down the whole flow.
+const ANSWER_REVEAL_MS    = 15000; // Correct/Wrong answer reveal (was 4s — students missed it)
+const QUESTION_SUMMARY_MS = 7000;  // class-wide stats beat (was 3s)
+const LEADERBOARD_MS      = 12000; // ranked leaderboard, then next question (was 3s)
+const COUNTDOWN_MS        = 3000;  // the "3…2…1" tail shown at the END of the leaderboard beat
 // A question object with its DISPLAY `points` scaled to match what's actually awarded —
 // used in the quiz:joined snapshots so a reload mid-question shows the same big number
 // students see on a fresh question. Handles both Mongoose subdocs and plain objects.
@@ -912,7 +922,11 @@ async function handleQuestionComplete(io, session, questionIndex) {
           teamLeaderboard, // ✅ NEW (Phase 3)
           questionMVP, // ✅ NEW (Phase 5.2)
           questionIndex,
-          isLastQuestion: questionIndex >= updatedSession.quiz.questions.length - 1
+          isLastQuestion: questionIndex >= updatedSession.quiz.questions.length - 1,
+          // ✅ how long until the next question fires — lets the client show the leaderboard
+          // for most of it, then a short countdown tail, staying in sync with this timer.
+          nextIn: LEADERBOARD_MS,
+          countdownMs: COUNTDOWN_MS
         });
 
         if (questionIndex < updatedSession.quiz.questions.length - 1) {
@@ -944,7 +958,7 @@ async function handleQuestionComplete(io, session, questionIndex) {
             }
 
             console.log(`➡️ Auto-advanced to question ${nextIndex + 1}`);
-          }, 3000); // ✅ CHANGED: this delay IS the client's Countdown duration
+          }, LEADERBOARD_MS); // leaderboard beat, then the next question
         } else {
           // Last question — end quiz
           setTimeout(async () => {
@@ -966,10 +980,10 @@ async function handleQuestionComplete(io, session, questionIndex) {
 
             // ✅ NEW: persist QuizResult/Analytics — runs after quiz:finished so it never delays students
             await finalizeQuizSession(io, updatedSession, finalLeaderboard);
-          }, 3000);
+          }, LEADERBOARD_MS); // leaderboard beat, then finish
         }
-      }, 3000); // Leaderboard shown for 3s before Countdown
-    }, 4000); // Correct/Wrong Feedback shown for 4s before Question Summary
+      }, QUESTION_SUMMARY_MS); // Question Summary shown, then Leaderboard
+    }, ANSWER_REVEAL_MS); // Answer Reveal (Correct/Wrong) shown, then Question Summary
 
   } catch (error) {
     console.error('❌ Question complete handler error:', error);

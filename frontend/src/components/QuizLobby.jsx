@@ -156,7 +156,14 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
 
     const onTeamFull = () => setTeamFullMessage('That team is full right now — try another.');
     const onQuizStarted = () => setQuizHasStarted(true);
-    const onError = (data) => { setErrorMsg(data.message || 'Something went wrong.'); setStarting(false); };
+    // ✅ FIX: this never cleared `loading`, which starts true and is otherwise only ever
+    // cleared by a SUCCESSFUL join (quiz:joined / fetchActiveSession). If the join itself
+    // failed — a stale/deleted session, a race right as the teacher recreated the quiz,
+    // a brief disconnect — the component stayed on the "Loading lobby..." spinner FOREVER,
+    // silently hiding the error message underneath it. This was the real cause behind
+    // "clicked the floating button and it's not showing the lobby correctly": the lobby
+    // WAS opening, it just never got past its own loading screen.
+    const onError = (data) => { setErrorMsg(data.message || 'Something went wrong.'); setStarting(false); setLoading(false); };
 
     socket.on('quiz:joined', onQuizJoined);
     socket.on('student:joined', onStudentJoined);
