@@ -24,6 +24,18 @@ const User = require('./models/User');
 const Group = require('./models/Group');
 const Message = require('./models/Message');
 const Notification = require('./models/Notification');
+// Auth Spec v2 — server.js used to define ITS OWN separate authenticateToken/
+// optionalAuth (setting only req.userId, no DB lookup, no fallback secret) while
+// every routes/*.js file used the different implementation in middleware/auth.js
+// (setting req.user, with an insecure hardcoded fallback secret). Now unified: this
+// is the only implementation, and it sets both req.user and req.userId.
+const { authenticateToken, optionalAuth, isTeacher } = require('./middleware/auth');
+const { generateToken, sanitizeUser, createTimedToken, verifyTimedToken, hashToken } = require('./services/authService');
+const { sendEmail } = require('./services/emailService');
+const { verificationEmail, passwordResetEmail } = require('./services/authEmailTemplates');
+const { verifyGoogleIdToken } = require('./services/googleAuthService');
+const { resolveGoogleUser } = require('./services/googleAccountResolver');
+const { AUTH_PROVIDERS } = require('./config/authProviders');
 
 // ============================================
 // SERVER SETUP
@@ -92,6 +104,7 @@ const { BADGE_CATALOG } = require('./badgeCatalog');
 const { startSessionReminderJob } = require('./jobs/sessionReminder');
 // Add this with other route imports (around line 20)
 const quizTestRoutes = require('./routes/quiz-test');
+const privacyRoutes = require('./routes/privacy');
 
 // Add this with other app.use routes (around line 50)
 
@@ -107,6 +120,7 @@ app.use('/api/analytics', analyticsRoutes);         // ⭐ ADD THIS
 app.use('/api/profile', profileRoutes);
 app.use('/api/rewards', rewardsRoutes);
 app.use('/api/notifications', notificationRoutes);  // ⭐ ADD THIS
+app.use('/api/privacy', privacyRoutes);
 
 // ============================================
 // START JOBS (Add after server starts)
@@ -210,46 +224,171 @@ const generatePIN = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const generateToken = (userId) => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET,
-    { expiresIn: '30d' }
+// Settings → Privacy → Show Online Status: given a list of candidate user ids (or
+// populated {_id,...} objects), returns the subset who've opted out — i.e. who
+// must NOT appear in any Group.onlineUsers payload sent to a client. This is a
+// separate leak from the isOnline field (masked by User.toJSON): being listed IN
+// onlineUsers is itself the presence signal, independent of any boolean field.
+const getHiddenOnlineUserIds = async (candidateIds) => {
+  if (!candidateIds || candidateIds.length === 0) return new Set();
+  const ids = candidateIds.map(id => (id && id._id ? id._id : id).toString());
+  const hidden = await User.find(
+    { _id: { $in: ids }, 'privacyPreferences.showOnlineStatus': false },
+    '_id'
+  );
+  return new Set(hidden.map(u => u._id.toString()));
+};
+
+// Private Session system — atomically transition (or create) a roster entry to
+// 'requested' when someone not on the invite list tries to join. Uses
+// arrayFilters throughout, not the positional $ operator — stress-testing
+// under real concurrency (several approve/reject/request calls racing on the
+// same document) showed plain query-matched positional-$ updates can silently
+// fail to apply while still reporting a matched document, which is exactly
+// the kind of bug that looks fine in a single manual test and then corrupts
+// state under load. arrayFilters is MongoDB's unambiguous mechanism for
+// "update the one array element matching these conditions" and is reliable
+// where the positional operator proved not to be.
+// Returns isNewRequest, decided by which atomic update actually wins, never
+// by a pre-read of the caller's in-memory group snapshot — under true
+// concurrency (several requests racing in with no existing entry yet), a
+// pre-read would have every one of them see "nothing exists" and each
+// conclude it's the first, spamming the teacher with a notification per
+// attempt instead of once for the one real request that landed.
+const upsertRosterRequest = async (groupId, email, userId) => {
+  const now = new Date();
+
+  // Case 1: a 'declined' entry being re-requested — genuinely new (decline
+  // isn't terminal), so the teacher should hear about it again.
+  //
+  // timestamps:false on every arrayFilters call below is load-bearing, not
+  // cosmetic: Group's schema has timestamps:true, so Mongoose auto-bumps
+  // updatedAt on every update — including ones whose arrayFilters matched
+  // ZERO array elements. That alone makes modifiedCount:1 even when the
+  // intended $set never touched anything, which silently defeated the
+  // "did this call actually win" checks below until caught by stress testing.
+  const setFields = { 'roster.$[elem].status': 'requested', 'roster.$[elem].requestedAt': now, 'roster.$[elem].respondedAt': null };
+  if (userId) setFields['roster.$[elem].user'] = userId;
+  let result = await Group.updateOne(
+    { _id: groupId },
+    { $set: setFields },
+    { arrayFilters: [{ 'elem.email': email, 'elem.status': 'declined' }], timestamps: false }
+  );
+  if (result.modifiedCount > 0) return true;
+
+  // Case 2: no entry at all yet — atomic push, race-safe: if several requests
+  // for the same never-before-seen email hit this simultaneously, only one
+  // query can match (the others no longer see 'roster.email': {$ne: email}
+  // once the first one lands), so only one is ever the "new" request. $push
+  // doesn't target a specific existing array element via arrayFilters, so
+  // it's unaffected by the timestamps quirk above — the query itself (not
+  // just the array-scoped $set) has to fail to match for modifiedCount to be 0.
+  result = await Group.updateOne(
+    { _id: groupId, 'roster.email': { $ne: email } },
+    { $push: { roster: { email, user: userId || null, status: 'requested', requestedAt: now } } }
+  );
+  if (result.modifiedCount > 0) return true;
+
+  // Case 3: already sitting in 'requested' — this attempt lost the race (or is
+  // simply a retry/double-click on an already-pending request). Just refresh
+  // the timestamp; no second notification for a request the teacher already has.
+  result = await Group.updateOne(
+    { _id: groupId },
+    { $set: { 'roster.$[elem].requestedAt': now } },
+    { arrayFilters: [{ 'elem.email': email, 'elem.status': 'requested' }], timestamps: false }
+  );
+  if (result.modifiedCount > 0) return false;
+
+  // Rare fallback (entry's state changed again between the checks above,
+  // e.g. a concurrent reject just landed) — retry the declined-transition path.
+  await Group.updateOne(
+    { _id: groupId },
+    { $set: setFields },
+    { arrayFilters: [{ 'elem.email': email }] }
+  );
+  return true;
+};
+
+// Private Session system — flips an 'invited' roster entry to 'joined' (also
+// resolving `user` if it was null, e.g. the account didn't exist at invite time).
+const markRosterJoined = async (groupId, email, userId) => {
+  const normalizedEmail = (email || '').toLowerCase().trim();
+  await Group.updateOne(
+    { _id: groupId },
+    { $set: { 'roster.$[elem].status': 'joined', 'roster.$[elem].user': userId } },
+    { arrayFilters: [{ 'elem.email': normalizedEmail }] }
   );
 };
 
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied. No token provided.' });
-  }
-  
+// Private Session system — real-time roster sync for the teacher's Session
+// Details view. Deliberately sent ONLY to the teacher's personal room, never to
+// the group room: the roster contains every invited/requested/declined
+// student's email, which regular classroom members must never see (same PII
+// concern as the isAdmin-gated GET /api/groups/:groupId response below).
+const emitRosterUpdate = async (group) => {
   try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (error) {
-    res.status(403).json({ error: 'Invalid or expired token.' });
+    const io = global.io;
+    if (!io) return;
+    const fresh = await Group.findById(group._id).select('roster admin').lean();
+    if (!fresh) return;
+    io.to(fresh.admin.toString()).emit('rosterUpdate', { groupId: group._id.toString(), roster: fresh.roster });
+  } catch (err) {
+    console.error('emitRosterUpdate error (non-fatal):', err.message);
   }
 };
 
-const optionalAuth = async (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (token) {
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      req.userId = decoded.userId;
-    } catch (error) {
-      console.log('Optional auth: Invalid token, proceeding without auth');
+// Private Session system — the single access-control decision point for every
+// join path (PIN entry, QR scan, and the ?pin= URL deep-link all terminate at
+// POST /api/groups/join, so fixing it here covers all of them). Returns
+// { allowed: true } to proceed with addMember, or { allowed: false,
+// pendingApproval: bool } to block — never leaks group/member data either way.
+const checkGroupAccess = async (group, email, userId) => {
+  const normalizedEmail = (email || '').toLowerCase().trim();
+
+  if (group.isPrivate) {
+    const existing = group.findRosterEntry(normalizedEmail);
+    if (existing && (existing.status === 'invited' || existing.status === 'joined')) {
+      return { allowed: true };
     }
+
+    // isNewRequest is decided atomically inside upsertRosterRequest (by which
+    // DB update wins), not from `existing` here — `existing` is a pre-loaded
+    // snapshot that's stale under true concurrency (see upsertRosterRequest's
+    // own comment for why a pre-read would over-notify).
+    const isNewRequest = await upsertRosterRequest(group._id, normalizedEmail, userId || null);
+
+    if (isNewRequest) {
+      try {
+        const requester = userId ? await User.findById(userId).select('name email') : null;
+        await Notification.createNotification({
+          recipient: group.admin,
+          type: 'join_request',
+          title: '🔔 Access Request',
+          message: `${requester?.name || normalizedEmail} (${requester?.email || normalizedEmail}) wants to join "${group.groupName}"`,
+          relatedGroup: group._id,
+          priority: 'high',
+          icon: '🔔',
+          metadata: { groupId: group._id.toString(), email: normalizedEmail, requesterName: requester?.name || null }
+        });
+      } catch (notifErr) {
+        console.error('Join-request notification error (non-fatal):', notifErr.message);
+      }
+    }
+    return { allowed: false, pendingApproval: true };
   }
-  
-  next();
+
+  if (group.allowedEmails && group.allowedEmails.length > 0) {
+    // Legacy path — for groups created before isPrivate/roster existed, whose
+    // only access gate is the older allowedEmails whitelist. Left untouched.
+    return { allowed: group.isEmailAllowed(normalizedEmail) };
+  }
+
+  return { allowed: true };
 };
+
+// generateToken/authenticateToken/optionalAuth now come from
+// ./services/authService and ./middleware/auth (imported near the top of this
+// file) — see the Auth Spec v2 note there for why.
 
 // ============================================
 // REST API ROUTES
@@ -274,6 +413,40 @@ app.get('/api/health', (req, res) => {
 // ------------------
 // AUTH ROUTES
 // ------------------
+
+// Auth Spec v2 §1/§8 — public, read-only. The shared auth UI (Phase 4) reads this
+// once on mount to decide which provider buttons are clickable vs shown as "coming
+// soon," instead of duplicating config/authProviders.js's registry in the frontend.
+app.get('/api/auth/providers', (req, res) => {
+  res.json({ providers: AUTH_PROVIDERS });
+});
+
+// Auth Spec v2 (ChatGPT/Notion/Slack-style entry flow) — the single email step
+// the shared auth screen submits before deciding whether to show a password
+// field (existing account) or a name/password registration form (new account).
+// Deliberately confirms account existence by design — this is the same
+// industry-standard trade-off every referenced product (ChatGPT, Notion, Slack)
+// makes for this exact UX, not an oversight. authProvider is also returned so
+// the UI can suggest "Continue with Google" instead of a doomed password
+// attempt for an email that was only ever created via Google.
+app.post('/api/auth/check-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    const emailNorm = String(email).trim().toLowerCase();
+    if (!/^\S+@\S+\.\S+$/.test(emailNorm)) {
+      return res.status(400).json({ error: 'Enter a valid email address' });
+    }
+
+    const user = await User.findOne({ email: emailNorm }).select('authProvider');
+    res.json({ exists: !!user, authProvider: user ? user.authProvider : null });
+  } catch (error) {
+    console.error('Check email error:', error);
+    res.status(500).json({ error: 'Server error checking email' });
+  }
+});
 
 app.post('/api/auth/register', async (req, res) => {
   try {
@@ -308,26 +481,36 @@ app.post('/api/auth/register', async (req, res) => {
       name: name || finalUsername,
       role: role || 'student'
     });
-    
+
+    // Auth Spec v2 §3 — email/password accounts start unverified (schema default)
+    // and can't log in until they click the emailed link. No JWT is issued here
+    // anymore: all 3 existing frontend callers (TeacherLogin.jsx, Login.js,
+    // register() in api.js) already ignore register()'s token and only show the
+    // success message, so removing it is a no-op for them, not a breaking change.
+    const { rawToken, hashedToken, expiresAt } = createTimedToken(24 * 60);
+    user.emailVerificationToken = hashedToken;
+    user.emailVerificationExpires = expiresAt;
+
     await user.save();
-    
-    const token = generateToken(user._id);
-    
+
+    try {
+      const emailContent = verificationEmail(user, rawToken);
+      await sendEmail({ to: user.email, ...emailContent });
+    } catch (emailErr) {
+      // Account is already created — don't fail registration over a transient
+      // email-send error. The user can always request another link via
+      // /api/auth/resend-verification.
+      console.error('Failed to send verification email:', emailErr);
+    }
+
     res.status(201).json({
-      message: 'User registered successfully',
-      token,
-      user: {
-        id: user._id.toString(),
-        username: user.username,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
+      message: 'Account created. Check your email to verify your account before logging in.',
+      user: sanitizeUser(user)
     });
-    
+
   } catch (error) {
     console.error('Register error:', error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Database connection failed",
       error: 'Server error during registration' });
   }
@@ -335,47 +518,97 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { username, email, password } = req.body;
-    
+    const { username, email, password, rememberMe } = req.body;
+
     if ((!username && !email) || !password) {
       return res.status(400).json({ error: 'Email/username and password are required' });
     }
-    
+
     const loginIdentifier = email || username;
-    
+
     const user = await User.findOne({
       $or: [
         { username: loginIdentifier },
         { email: loginIdentifier }
       ]
     });
-    
+
     if (!user) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
+
     const isPasswordValid = await user.comparePassword(password);
     if (!isPasswordValid) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    
-    const token = generateToken(user._id);
-    
+
+    // Auth Spec v2 §3 — hard gate, email/password accounts only. Every other
+    // authProvider (Google now, others later) is exempt by construction since
+    // this check only runs for authProvider:'email'. Pre-existing accounts were
+    // grandfathered to emailVerified:true by scripts/grandfatherEmailVerified.js
+    // so this cannot lock out anyone who could already log in before Phase 2.
+    if (user.authProvider === 'email' && !user.emailVerified) {
+      return res.status(403).json({
+        error: 'Please verify your email before logging in. Check your inbox for the verification link.',
+        code: 'EMAIL_NOT_VERIFIED'
+      });
+    }
+
+    user.lastLogin = new Date();
+    await user.save();
+
+    // Auth Spec v2 §7 — "Remember me": checked → 30d session, unchecked → 1d
+    // session, refresh must never log anyone out either way (both durations
+    // comfortably outlive any real browsing session). Existing callers that don't
+    // send rememberMe at all (current frontend, pre-Phase-4 UI) default to
+    // remembered:true — identical to the previous unconditional-long-session
+    // behavior, so this is not a regression for any existing flow.
+    const token = generateToken(user._id, { rememberMe: rememberMe !== false });
+
     res.json({
       message: 'Login successful',
       token,
-      user: {
-        id: user._id.toString(),
-        username: user.username,
-        email: user.email,
-        name: user.name,
-        role: user.role
-      }
+      user: sanitizeUser(user)
     });
-    
+
   } catch (error) {
     console.error('Login error:', error);
     res.status(500).json({ error: 'Server error during login' });
+  }
+});
+
+// ------------------
+// GOOGLE OAUTH
+// Auth Spec v2 §2 — one endpoint handles all three cases: an existing Google user
+// signing back in, an existing email/password user linking their (Google-verified)
+// email, and a brand-new account being auto-created. `role` is only ever consulted
+// for the auto-create case and is a claim from the request body, so it MUST be
+// whitelisted here — never trust it enough to let a client mint an admin account.
+// ------------------
+app.post('/api/auth/google', async (req, res) => {
+  try {
+    const { idToken, role, rememberMe } = req.body;
+
+    let profile;
+    try {
+      profile = await verifyGoogleIdToken(idToken);
+    } catch (verifyErr) {
+      return res.status(401).json({ error: verifyErr.message || 'Invalid Google sign-in.' });
+    }
+
+    const { user, isNewUser } = await resolveGoogleUser(profile, { role });
+
+    const token = generateToken(user._id, { rememberMe: rememberMe !== false });
+
+    res.json({
+      message: isNewUser ? 'Account created successfully' : 'Signed in successfully',
+      token,
+      isNewUser,
+      user: sanitizeUser(user)
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    res.status(500).json({ error: 'Server error during Google sign-in' });
   }
 });
 
@@ -453,6 +686,148 @@ app.post('/api/auth/student-guest-auth', async (req, res) => {
   } catch (error) {
     console.error('Student guest auth error:', error);
     return res.status(500).json({ error: 'Server error during authentication.' });
+  }
+});
+
+// ------------------
+// VERIFY EMAIL
+// Auth Spec v2 §3 — the raw token only ever exists in the emailed link; only its
+// hash is stored (createTimedToken/verifyTimedToken from authService.js, same
+// pattern already used for passwordResetToken below).
+// ------------------
+app.post('/api/auth/verify-email', async (req, res) => {
+  try {
+    const { token } = req.body;
+    if (!token) {
+      return res.status(400).json({ error: 'Verification token is required' });
+    }
+
+    const hashed = hashToken(token);
+    const user = await User.findOne({ emailVerificationToken: hashed })
+      .select('+emailVerificationToken +emailVerificationExpires');
+
+    if (!user || !verifyTimedToken(token, user.emailVerificationToken, user.emailVerificationExpires)) {
+      return res.status(400).json({ error: 'This verification link is invalid or has expired.' });
+    }
+
+    user.emailVerified = true;
+    user.emailVerificationToken = null;
+    user.emailVerificationExpires = null;
+    await user.save();
+
+    res.json({ message: 'Email verified successfully. You can now log in.' });
+  } catch (error) {
+    console.error('Verify email error:', error);
+    res.status(500).json({ error: 'Server error during email verification' });
+  }
+});
+
+// ------------------
+// RESEND VERIFICATION EMAIL
+// Anti-enumeration: always returns the same generic response regardless of
+// whether the email exists, is already verified, or uses a different provider —
+// so this endpoint can't be used to probe which emails have accounts.
+// ------------------
+app.post('/api/auth/resend-verification', async (req, res) => {
+  const genericResponse = { message: 'If an account with that email exists and needs verification, a new verification link has been sent.' };
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const user = await User.findOne({ email: String(email).trim().toLowerCase() });
+    if (user && user.authProvider === 'email' && !user.emailVerified) {
+      const { rawToken, hashedToken, expiresAt } = createTimedToken(24 * 60);
+      user.emailVerificationToken = hashedToken;
+      user.emailVerificationExpires = expiresAt;
+      await user.save();
+
+      try {
+        const emailContent = verificationEmail(user, rawToken);
+        await sendEmail({ to: user.email, ...emailContent });
+      } catch (emailErr) {
+        console.error('Failed to send verification email:', emailErr);
+      }
+    }
+
+    res.json(genericResponse);
+  } catch (error) {
+    console.error('Resend verification error:', error);
+    res.json(genericResponse);
+  }
+});
+
+// ------------------
+// FORGOT PASSWORD
+// Anti-enumeration, same pattern as resend-verification above. 15-30 min expiry
+// per Auth Spec v2 §4 (using 30).
+// ------------------
+app.post('/api/auth/forgot-password', async (req, res) => {
+  const genericResponse = { message: 'If an account with that email exists, a password reset link has been sent.' };
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    // Only email/password accounts have a local password to reset — OAuth
+    // accounts (Google, etc.) have no password field by design.
+    const user = await User.findOne({ email: String(email).trim().toLowerCase(), authProvider: 'email' });
+    if (user) {
+      const { rawToken, hashedToken, expiresAt } = createTimedToken(30);
+      user.passwordResetToken = hashedToken;
+      user.passwordResetExpires = expiresAt;
+      await user.save();
+
+      try {
+        const emailContent = passwordResetEmail(user, rawToken);
+        await sendEmail({ to: user.email, ...emailContent });
+      } catch (emailErr) {
+        console.error('Failed to send password reset email:', emailErr);
+      }
+    }
+
+    res.json(genericResponse);
+  } catch (error) {
+    console.error('Forgot password error:', error);
+    res.json(genericResponse);
+  }
+});
+
+// ------------------
+// RESET PASSWORD
+// The reset token itself is the secret here (not an email address), so unlike the
+// two endpoints above, it's safe to say specifically "invalid or expired" without
+// leaking anything about which emails have accounts.
+// ------------------
+app.post('/api/auth/reset-password', async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: 'Token and new password are required' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+
+    const hashed = hashToken(token);
+    const user = await User.findOne({ passwordResetToken: hashed })
+      .select('+passwordResetToken +passwordResetExpires');
+
+    if (!user || !verifyTimedToken(token, user.passwordResetToken, user.passwordResetExpires)) {
+      return res.status(400).json({ error: 'This password reset link is invalid or has expired.' });
+    }
+
+    user.password = newPassword; // pre-save hook hashes it
+    user.passwordResetToken = null;
+    user.passwordResetExpires = null;
+    await user.save();
+
+    res.json({ message: 'Password reset successfully. You can now log in with your new password.' });
+  } catch (error) {
+    console.error('Reset password error:', error);
+    res.status(500).json({ error: 'Server error during password reset' });
   }
 });
 
@@ -612,7 +987,14 @@ app.use((error, req, res, next) => {
 // GROUP ROUTES
 // ------------------
 
-app.post('/api/groups/create', authenticateToken, async (req, res) => {
+// Phase 5 route-guard audit — this route had NO role check at all: any
+// authenticated student could call it and become the "admin" of their own
+// classroom (confirmed live before this fix). A dead/unmounted duplicate route
+// file (routes/groupRoutes.js + controllers/groupController.js, removed in the
+// final audit) had documented this as "Teacher only" and even had isTeacher
+// wired — but it was never require()'d by server.js, so it was never actually
+// enforced. This is the one real route Express serves for this path.
+app.post('/api/groups/create', authenticateToken, isTeacher, async (req, res) => {
   try {
     const { groupName } = req.body;
     
@@ -769,14 +1151,14 @@ app.post('/api/groups/join', optionalAuth, async (req, res) => {
     // ============================================
     if (req.userId) {
       console.log('👤 Authenticated join for user:', req.userId);
-      
+
       // Check if already a member
       if (group.isMember(req.userId)) {
         console.log('✅ User already a member');
-        
+
         await group.populate('admin', 'username name');
         await group.populate('members.user', 'username name isOnline');
-        
+
         return res.json({
           message: 'Already a member',
           group: {
@@ -789,42 +1171,34 @@ app.post('/api/groups/join', optionalAuth, async (req, res) => {
           }
         });
       }
-      // Find: const group = await Group.findOne({ pin: cleanPin, isActive: true });
 
-      // RIGHT AFTER finding the group and BEFORE checking if user is member, ADD:
+      // Private Session system — single access-control decision for this join
+      // attempt (covers isPrivate+roster and the legacy allowedEmails whitelist).
+      const authUser = await User.findById(req.userId).select('email');
+      const access = await checkGroupAccess(group, authUser?.email, req.userId);
+      if (!access.allowed) {
+        console.log('❌ Join failed: not authorized', access.pendingApproval ? '(request filed)' : '(legacy whitelist)');
+        return res.status(403).json({
+          error: access.pendingApproval
+            ? 'You are not allowed to join this class. Please contact the teacher if you believe this is a mistake.'
+            : 'Your email is not authorized for this session. Please contact the teacher.',
+          pendingApproval: !!access.pendingApproval
+        });
+      }
+      if (group.isPrivate) {
+        await markRosterJoined(group._id, authUser?.email, req.userId);
+      }
 
-          // ⭐ NEW: Check email whitelist
-          if (group.allowedEmails && group.allowedEmails.length > 0) {
-            let userEmail;
-            
-            if (req.userId) {
-              // Authenticated user
-              const user = await User.findById(req.userId);
-              userEmail = user.email;
-            } else {
-              // Guest user
-              userEmail = email;
-            }
-            
-            if (!group.isEmailAllowed(userEmail)) {
-              console.log('❌ Join failed: Email not authorized');
-              return res.status(403).json({ 
-                error: 'Your email is not authorized for this session. Please contact the teacher.' 
-              });
-            }
-            
-            console.log('✅ Email authorized:', userEmail);
-          }
-      
       // Add as member
       console.log('➕ Adding user to group');
       await group.addMember(req.userId);
-      
+      if (group.isPrivate) emitRosterUpdate(group);
+
       await group.populate('admin', 'username name');
       await group.populate('members.user', 'username name isOnline');
-      
+
       console.log('✅ User joined successfully');
-      
+
       return res.json({
         message: 'Joined group successfully',
         group: {
@@ -837,40 +1211,55 @@ app.post('/api/groups/join', optionalAuth, async (req, res) => {
         }
       });
     }
-    
+
     // ============================================
     // GUEST USER JOIN
     // ============================================
     console.log('👥 Guest join attempt');
-    
+
     if (!name || !email) {
       console.log('❌ Guest join failed: Name or email missing');
-      return res.status(400).json({ 
-        error: 'Name and email are required for guest join' 
+      return res.status(400).json({
+        error: 'Name and email are required for guest join'
       });
     }
-    
+
     const emailNorm = email.trim().toLowerCase();
-    
+
     console.log('🔍 Checking if user exists with email:', emailNorm);
-    
+
     let student = await User.findOne({ email: emailNorm });
-    
+
+    // Private Session system — check access BEFORE creating an account for an
+    // unauthorized attempt, so a rejected/pending guest join doesn't leave a
+    // throwaway User document behind. student may be null here (no account
+    // yet) — checkGroupAccess/upsertRosterRequest both handle a null userId.
+    const guestAccess = await checkGroupAccess(group, emailNorm, student?._id || null);
+    if (!guestAccess.allowed) {
+      console.log('❌ Guest join failed: not authorized', guestAccess.pendingApproval ? '(request filed)' : '(legacy whitelist)');
+      return res.status(403).json({
+        error: guestAccess.pendingApproval
+          ? 'You are not allowed to join this class. Please contact the teacher if you believe this is a mistake.'
+          : 'Your email is not authorized for this session. Please contact the teacher.',
+        pendingApproval: !!guestAccess.pendingApproval
+      });
+    }
+
     if (!student) {
       console.log('👤 Creating new student user');
-      
+
       const usernameBase = name.trim().replace(/\s+/g, '_').replace(/[^\w\-._]/g, '').slice(0, 30) || 'student';
       let username = usernameBase;
       let suffix = 0;
-      
+
       while (await User.findOne({ username })) {
         suffix++;
         username = `${usernameBase}_${suffix}`;
         if (suffix > 100) break;
       }
-      
+
       const randomPass = crypto.randomBytes(8).toString('hex');
-      
+
       student = new User({
         username,
         email: emailNorm,
@@ -878,28 +1267,33 @@ app.post('/api/groups/join', optionalAuth, async (req, res) => {
         name: name.trim(),
         role: 'student'
       });
-      
+
       await student.save();
       console.log('✅ New student created:', username);
     } else {
       console.log('✅ Existing user found:', student.username);
     }
-    
+
+    if (group.isPrivate) {
+      await markRosterJoined(group._id, emailNorm, student._id);
+    }
+
     // Add to group if not already member
     if (!group.isMember(student._id)) {
       console.log('➕ Adding guest to group');
       await group.addMember(student._id);
+      if (group.isPrivate) emitRosterUpdate(group);
     } else {
       console.log('ℹ️ Guest already a member');
     }
-    
+
     const token = generateToken(student._id);
-    
+
     await group.populate('admin', 'username name');
     await group.populate('members.user', 'username name isOnline');
-    
+
     console.log('✅ Guest joined successfully:', student.name);
-    
+
     res.json({
       message: 'Joined group successfully',
       token,
@@ -949,17 +1343,38 @@ app.get('/api/groups/my-groups', authenticateToken, async (req, res) => {
     .sort({ createdAt: -1 })
     .lean(); // skip Mongoose document wrapper overhead — this endpoint is read-only
 
+    // Settings → Privacy → Show Online Status. .lean() returns plain objects, so
+    // User.toJSON's isOnline masking never runs here — mask it manually. Collect
+    // every candidate id across all groups first so this is one query, not N+1.
+    const allMemberIds = groups.flatMap(g => (g.members || []).map(m => m.user?._id).filter(Boolean));
+    const allOnlineIds = groups.flatMap(g => g.onlineUsers || []);
+    const hiddenIds = await getHiddenOnlineUserIds([...allMemberIds, ...allOnlineIds]);
+
     const groupsWithJoinedAt = groups.map(group => {
       // With .lean() group is already a plain object — no .toObject() needed
       const currentUserMember = group.members.find(m =>
         m.user && m.user._id && m.user._id.toString() === req.userId.toString()
       );
-      return {
+      (group.members || []).forEach(m => {
+        if (m.user && hiddenIds.has(m.user._id.toString())) m.user.isOnline = false;
+      });
+      const visibleOnlineUsers = (group.onlineUsers || []).filter(id => !hiddenIds.has(id.toString()));
+
+      // Private Session system — same teacher-only gate as GET /api/groups/:groupId.
+      // .lean() returns every schema field by default, so roster (other people's
+      // emails/request history) would otherwise leak to every ordinary member here.
+      const isAdminHere = group.admin && group.admin._id && group.admin._id.toString() === req.userId.toString();
+      const rosterField = (group.isPrivate && isAdminHere) ? group.roster : undefined;
+
+      const result = {
         ...group,
+        onlineUsers: visibleOnlineUsers,
         userJoinedAt: currentUserMember ? currentUserMember.joinedAt : null
       };
+      if (rosterField) result.roster = rosterField; else delete result.roster;
+      return result;
     });
-    
+
     res.json({ groups: groupsWithJoinedAt });
     
   } catch (error) {
@@ -976,26 +1391,190 @@ app.get('/api/groups/:groupId', authenticateToken, async (req, res) => {
     const group = await Group.findById(groupId)
       .populate('admin', 'username name')
       .populate('members.user', 'username name isOnline')
-      .populate('onlineUsers', 'username');
-    
+      .populate('onlineUsers', 'username')
+      .populate('roster.user', 'username name');
+
     if (!group) {
       return res.status(404).json({ error: 'Group not found' });
     }
-    
+
     if (!group.isMember(req.userId)) {
       return res.status(403).json({ error: 'You are not a member of this group' });
     }
-    
-    // ✅ Check if session is still active
-    if (!group.isActive) {
+
+    // ✅ Check if session is still active — the admin is exempt (pre-existing
+    // bug, not introduced by Private Sessions: this blocked the teacher too,
+    // which broke "Session Details" for every already-ended group, not just
+    // private ones — a regular member trying to re-enter an ended chat still
+    // correctly gets blocked here).
+    if (!group.isActive && !group.isAdmin(req.userId)) {
       return res.status(403).json({ error: 'This session has ended' });
     }
-    
-    res.json({ group });
+
+    // Settings → Privacy → Show Online Status — see getHiddenOnlineUserIds above.
+    const hiddenIds = await getHiddenOnlineUserIds(group.onlineUsers);
+    group.onlineUsers = group.onlineUsers.filter(u => !hiddenIds.has(u._id.toString()));
+
+    // Private Session system — roster (Invited/Joined status for Session Details)
+    // is teacher-only. Every ordinary member hits this same endpoint on every
+    // group load, so it must never be present in the response for a student —
+    // it contains other people's emails and request/decline history.
+    const responseGroup = group.toObject();
+    if (group.isPrivate && group.isAdmin(req.userId)) {
+      const onlineIdSet = new Set(group.onlineUsers.map(u => u._id.toString()));
+      responseGroup.roster = group.roster.map(r => ({
+        email: r.email,
+        user: r.user ? { _id: r.user._id, name: r.user.name, username: r.user.username } : null,
+        status: r.status,
+        invitedAt: r.invitedAt,
+        requestedAt: r.requestedAt,
+        respondedAt: r.respondedAt,
+        online: !!(r.user && onlineIdSet.has(r.user._id.toString()) && !hiddenIds.has(r.user._id.toString()))
+      }));
+    } else {
+      delete responseGroup.roster;
+    }
+
+    res.json({ group: responseGroup });
     
   } catch (error) {
     console.error('Get group error:', error);
     res.status(500).json({ error: 'Server error fetching group' });
+  }
+});
+
+// Private Session system — teacher approves a pending ('requested') roster
+// entry, letting that student in immediately. Every step is atomic: two
+// concurrent approve calls for the same request (double-click, retry, etc.)
+// must add the member exactly once and notify exactly once, never duplicate
+// either — see the stress-test notes above upsertRosterRequest for why a
+// load-mutate-save pattern doesn't hold up under real concurrency.
+app.post('/api/groups/:groupId/roster/:email/approve', authenticateToken, async (req, res) => {
+  try {
+    const { groupId, email } = req.params;
+    const normalizedEmail = decodeURIComponent(email).toLowerCase().trim();
+
+    const group = await Group.findById(groupId).select('admin');
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (!group.isAdmin(req.userId)) {
+      return res.status(403).json({ error: 'Only the teacher can approve access requests' });
+    }
+
+    const entryLookup = await Group.findOne(
+      { _id: groupId, 'roster.email': normalizedEmail },
+      { roster: { $elemMatch: { email: normalizedEmail } } }
+    );
+    const entry = entryLookup?.roster?.[0];
+    if (!entry) return res.status(404).json({ error: 'No request found for that email' });
+
+    const now = new Date();
+
+    // Add as a member — $ne guard makes this a no-op for every call after the
+    // first, instead of each one blindly pushing its own duplicate entry.
+    if (entry.user) {
+      await Group.updateOne(
+        { _id: groupId, 'members.user': { $ne: entry.user } },
+        { $push: { members: { user: entry.user, joinedAt: now } } }
+      );
+    }
+
+    // Flip roster status via arrayFilters, not the positional $ operator — under
+    // real concurrency (several approve calls racing on the same document), a
+    // plain query-matched positional $ update proved unreliable at correctly
+    // scoping to just the one transitioning element (confirmed via stress
+    // testing: concurrent calls all reported success while the document never
+    // actually changed). arrayFilters is MongoDB's unambiguous mechanism for
+    // this and is what should have been used from the start.
+    const flipUpdate = await Group.updateOne(
+      { _id: groupId },
+      { $set: { 'roster.$[elem].status': 'joined', 'roster.$[elem].respondedAt': now } },
+      { arrayFilters: [{ 'elem.email': normalizedEmail, 'elem.status': { $in: ['requested', 'declined'] } }], timestamps: false }
+    );
+    const flipped = flipUpdate.modifiedCount > 0;
+
+    const freshGroup = await Group.findById(groupId);
+    emitRosterUpdate(freshGroup);
+
+    if (flipped && entry.user) {
+      try {
+        await Notification.createNotification({
+          recipient: entry.user,
+          sender: req.userId,
+          type: 'access_approved',
+          title: '✅ Access Approved',
+          message: `You've been let into "${freshGroup.groupName}". Join now!`,
+          relatedGroup: freshGroup._id,
+          priority: 'high',
+          icon: '✅',
+          metadata: { groupId: freshGroup._id.toString(), pin: freshGroup.pin }
+        });
+      } catch (notifErr) {
+        console.error('Access-approved notification error (non-fatal):', notifErr.message);
+      }
+    }
+
+    res.json({ message: 'Access approved', email: normalizedEmail });
+  } catch (error) {
+    console.error('Approve roster request error:', error);
+    res.status(500).json({ error: 'Server error approving request' });
+  }
+});
+
+// Private Session system — teacher rejects a pending ('requested') roster
+// entry. Not terminal — a fresh join attempt from the same email re-requests.
+// Same atomic-transition gating as approve, so concurrent duplicate reject
+// calls notify exactly once.
+app.post('/api/groups/:groupId/roster/:email/reject', authenticateToken, async (req, res) => {
+  try {
+    const { groupId, email } = req.params;
+    const normalizedEmail = decodeURIComponent(email).toLowerCase().trim();
+
+    const group = await Group.findById(groupId).select('admin');
+    if (!group) return res.status(404).json({ error: 'Group not found' });
+    if (!group.isAdmin(req.userId)) {
+      return res.status(403).json({ error: 'Only the teacher can reject access requests' });
+    }
+
+    const entryLookup = await Group.findOne(
+      { _id: groupId, 'roster.email': normalizedEmail },
+      { roster: { $elemMatch: { email: normalizedEmail } } }
+    );
+    const entry = entryLookup?.roster?.[0];
+    if (!entry) return res.status(404).json({ error: 'No request found for that email' });
+
+    const now = new Date();
+    // arrayFilters, not positional $ — see the approve endpoint's comment.
+    const flipUpdate = await Group.updateOne(
+      { _id: groupId },
+      { $set: { 'roster.$[elem].status': 'declined', 'roster.$[elem].respondedAt': now } },
+      { arrayFilters: [{ 'elem.email': normalizedEmail, 'elem.status': { $in: ['requested', 'invited'] } }], timestamps: false }
+    );
+    const flipped = flipUpdate.modifiedCount > 0;
+
+    const freshGroup = await Group.findById(groupId);
+    emitRosterUpdate(freshGroup);
+
+    if (flipped && entry.user) {
+      try {
+        await Notification.createNotification({
+          recipient: entry.user,
+          sender: req.userId,
+          type: 'access_declined',
+          title: '🚫 Access Declined',
+          message: `Your request to join "${freshGroup.groupName}" was declined.`,
+          relatedGroup: freshGroup._id,
+          priority: 'medium',
+          icon: '🚫'
+        });
+      } catch (notifErr) {
+        console.error('Access-declined notification error (non-fatal):', notifErr.message);
+      }
+    }
+
+    res.json({ message: 'Access declined', email: normalizedEmail });
+  } catch (error) {
+    console.error('Reject roster request error:', error);
+    res.status(500).json({ error: 'Server error rejecting request' });
   }
 });
 
@@ -1014,19 +1593,73 @@ app.post('/api/groups/:groupId/end', authenticateToken, async (req, res) => {
     }
     
     await group.endSession();
-    
+
     console.log('🔴 Session ended:', groupId);
-    
+
     io.to(groupId).emit('sessionEnded', {
       message: 'The admin has ended this session',
       groupId: group._id
     });
-    
+
+    // "Class completed successfully" — notify everyone who actually attended
+    // (group.members), not the teacher themselves and not the full invite list
+    // (people who were invited but never joined weren't "in" the class).
+    try {
+      const attendeeIds = group.members
+        .map(m => m.user.toString())
+        .filter(id => id !== req.userId.toString());
+      if (attendeeIds.length > 0) {
+        await Notification.createBulkNotifications(attendeeIds, {
+          sender: req.userId,
+          type: 'session_ended',
+          title: '🏁 Class Completed',
+          message: `"${group.groupName}" has ended. Class completed successfully.`,
+          relatedGroup: group._id,
+          priority: 'low',
+          icon: '🏁'
+        });
+      }
+    } catch (notifErr) {
+      console.error('Class-completed notification error (non-fatal):', notifErr.message);
+    }
+
     res.json({ message: 'Session ended successfully' });
     
   } catch (error) {
     console.error('End session error:', error);
     res.status(500).json({ error: 'Server error ending session' });
+  }
+});
+
+// Teacher Moderated Chat — admin-only toggle. Broadcasts to the whole group
+// room so every connected client (teacher + all students) updates instantly.
+app.post('/api/groups/:groupId/moderated-chat', authenticateToken, async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { enabled } = req.body;
+
+    const group = await Group.findById(groupId);
+    if (!group) {
+      return res.status(404).json({ error: 'Group not found' });
+    }
+
+    if (!group.isAdmin(req.userId)) {
+      return res.status(403).json({ error: 'Only the teacher can change this setting' });
+    }
+
+    group.moderatedChat = !!enabled;
+    await group.save();
+
+    io.to(groupId).emit('moderatedChatToggled', {
+      groupId: group._id,
+      moderatedChat: group.moderatedChat
+    });
+
+    res.json({ moderatedChat: group.moderatedChat });
+
+  } catch (error) {
+    console.error('Toggle moderated chat error:', error);
+    res.status(500).json({ error: 'Server error updating moderated chat setting' });
   }
 });
 
@@ -1037,23 +1670,37 @@ app.post('/api/groups/:groupId/end', authenticateToken, async (req, res) => {
 app.get('/api/groups/:groupId/messages', authenticateToken, async (req, res) => {
   try {
     const { groupId } = req.params;
-    
+
     const group = await Group.findById(groupId);
     if (!group) {
       return res.status(404).json({ error: 'Group not found' });
     }
-    
+
     if (!group.isMember(req.userId)) {
       return res.status(403).json({ error: 'You are not a member of this group' });
     }
-    
-    const messages = await Message.find({ group: groupId })
+
+    // Teacher Moderated Chat: non-admins only ever see their own messages,
+    // broadcasts (recipient:null), and messages addressed to them. The admin
+    // always sees everything. Because non-moderated sends always store
+    // recipient:null, this same filter is a no-op when the mode is off.
+    const query = { group: groupId };
+    if (!group.isAdmin(req.userId)) {
+      query.$or = [
+        { sender: req.userId },
+        { recipient: null },
+        { recipient: req.userId }
+      ];
+    }
+
+    const messages = await Message.find(query)
       .populate('sender', 'username name isOnline avatar')
+      .populate('recipient', 'username name')
       .sort({ createdAt: 1 })
       .limit(100);
-    
+
     res.json({ messages });
-    
+
   } catch (error) {
     console.error('Get messages error:', error);
     res.status(500).json({ error: 'Server error fetching messages' });
@@ -1136,12 +1783,13 @@ io.on('connection', (socket) => {
       });
       
       socket.emit('joinedGroup', { groupId });
-      
+
       await group.populate('onlineUsers', 'username');
+      const hiddenIds = await getHiddenOnlineUserIds(group.onlineUsers);
       io.to(groupId).emit('onlineUsersUpdate', {
-        onlineUsers: group.onlineUsers
+        onlineUsers: group.onlineUsers.filter(u => !hiddenIds.has(u._id.toString()))
       });
-      
+
       console.log(`✅ User ${socket.userId} joined group ${groupId}`);
       
     } catch (error) {
@@ -1164,12 +1812,13 @@ io.on('connection', (socket) => {
       await group.save();
       
       socket.leave(groupId);
-      
+
       await group.populate('onlineUsers', 'username');
+      const hiddenIds = await getHiddenOnlineUserIds(group.onlineUsers);
       io.to(groupId).emit('onlineUsersUpdate', {
-        onlineUsers: group.onlineUsers
+        onlineUsers: group.onlineUsers.filter(u => !hiddenIds.has(u._id.toString()))
       });
-      
+
       console.log(`👋 User ${socket.userId} left group ${groupId}`);
       
     } catch (error) {
@@ -1183,51 +1832,61 @@ io.on('connection', (socket) => {
       if (!socket.userId) {
         return socket.emit('error', { error: 'Not authenticated' });
       }
-      
+
       const { groupId, content, messageType, recipientId, fileUrl, fileName, fileSize, fileType } = data;
-      
+
       const group = await Group.findById(groupId);
       if (!group || !group.isMember(socket.userId)) {
         return socket.emit('error', { error: 'Access denied' });
       }
-      
+
+      // Teacher Moderated Chat — recipient is always resolved server-side,
+      // never trusted from the client. When the mode is off, every message
+      // is a broadcast (recipient:null), exactly like before this feature.
+      // When it's on: students' messages are forced to the teacher; the
+      // teacher may broadcast or target any single member (multi-recipient
+      // replies are handled client-side as one sendMessage call per target).
+      let finalRecipient = null;
+      if (group.moderatedChat) {
+        if (group.isAdmin(socket.userId)) {
+          if (recipientId && group.isMember(recipientId)) {
+            finalRecipient = recipientId;
+          }
+        } else {
+          finalRecipient = group.admin;
+        }
+      }
+
       const message = new Message({
         group: groupId,
         sender: socket.userId,
         content,
-        messageType: messageType || 'text',
-        recipient: recipientId || null,
+        messageType: finalRecipient ? 'private' : (messageType || 'text'),
+        recipient: finalRecipient,
         fileUrl: fileUrl || null,
         fileName: fileName || null,
         fileSize: fileSize || null,
         fileType: fileType || null
       });
-      
+
       await message.save();
-      
+
       await message.populate('sender', 'username name isOnline avatar');
-      if (recipientId) {
-        await message.populate('recipient', 'username');
+      if (finalRecipient) {
+        await message.populate('recipient', 'username name');
       }
-      
-      if (messageType === 'private' && recipientId) {
-        const recipient = await User.findById(recipientId);
-        if (recipient && recipient.socketId) {
-          io.to(recipient.socketId).emit('newMessage', message);
-        }
-        socket.emit('newMessage', message);
+
+      if (finalRecipient) {
+        io.to(socket.userId.toString()).to(finalRecipient.toString()).emit('newMessage', message);
       } else {
         io.to(groupId).emit('newMessage', message);
       }
-      
+
     } catch (error) {
       console.error('Send message error:', error);
       socket.emit('error', { error: 'Failed to send message' });
     }
   });
-  // Find: socket.on('sendMessage', async (data) => { ... });
-
-  // AFTER the entire sendMessage handler, ADD:
 
     // ⭐ NEW: POLL VOTING
     socket.on('votePoll', async (data) => {

@@ -6,12 +6,10 @@
 // 4. All socket events, quiz features, student dashboard — IDENTICAL to previous version
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { getMyGroups, getGroupDetails, getMessages, endSession, startScheduledSession, cancelScheduledSession, pingBackend, createQuickQuizGroup } from './api';
+import { getMyGroups, getGroupDetails, getMessages, endSession, startScheduledSession, cancelScheduledSession, pingBackend, createQuickQuizGroup, toggleModeratedChat } from './api';
 import socket from './socket';
 import Home from './pages/Home';
-import Login from './components/Login';
-import TeacherLogin from './pages/TeacherLogin';
-import StudentJoin from './pages/StudentJoin';
+import AuthScreen from './pages/AuthScreen';
 import Header from './components/Header';
 import Sidebar, { Settings as AccountSettings } from './components/Sidebar';
 import ChatArea from './components/ChatArea';
@@ -27,10 +25,29 @@ import QuizPlayer from './components/QuizPlayer';
 import AvatarBuilder from './components/AvatarBuilder';
 import TeacherProfile from './components/TeacherProfile';
 import MyProfile from './components/MyProfile';
+import UpcomingSessions from './components/UpcomingSessions';
 import RewardsLocker from './components/RewardsLocker';
+import NotificationSettings from './components/NotificationSettings';
+import PreferencesSettings from './components/PreferencesSettings';
+import PrivacySettings from './components/PrivacySettings';
+import { getStoredAccentColor, applyAccentColor, getStoredAccessibilityPrefs, applyAccessibilityPrefs } from './theme';
 // eslint-disable-next-line no-unused-vars
 import Footer from './components/Footer';
 
+
+// Settings → Preferences → Appearance. 'themeMode' is the user's actual choice
+// ('light' | 'dark' | 'system'); isDark (used everywhere else in this file) is
+// always the resolved boolean derived from it — 'system' resolves live from the
+// OS's prefers-color-scheme instead of a fixed value.
+const getStoredThemeMode = () => {
+  const saved = localStorage.getItem('themeMode');
+  if (saved === 'light' || saved === 'dark' || saved === 'system') return saved;
+  // Back-compat: no themeMode saved yet, fall back to the legacy binary 'theme' key
+  // (set by this file before Preferences existed, and still used by Home.jsx pre-login).
+  return localStorage.getItem('theme') === 'dark' ? 'dark' : 'light';
+};
+const resolveIsDark = (mode) =>
+  mode === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : mode === 'dark';
 
 // ── INSTRUCTOR HUB STYLES (theme-aware) ──
 function getD(dk) {
@@ -41,9 +58,10 @@ function getD(dk) {
   const txt   = dk ? '#f1f5f9' : '#111827';
   const txt2  = dk ? '#94a3b8' : '#6b7280';
   const txt3  = dk ? '#64748b' : '#9ca3af';
-  const inv   = dk ? '#1e3a5f' : '#EEF2FF';
+  const inv   = dk ? '#1e3a5f' : 'var(--cv-accent-light)';
   const btn   = dk ? '#1e293b' : 'white';
   const btnTxt= dk ? '#cbd5e1' : '#374151';
+  const infoBg= dk ? '#0a111f' : '#f9fafb';
   return {
   shell:{ display:'flex', height:'100%', backgroundColor:bg, overflow:'hidden' },
   sidebar:{ flexShrink:0, backgroundColor:surf, borderRight:`1px solid ${bdr}`, display:'flex', flexDirection:'column', padding:'12px 0', overflowY:'auto', overflowX:'hidden' },
@@ -68,7 +86,7 @@ function getD(dk) {
   pageTitle:{ fontSize:'24px', fontWeight:'800', color:txt },
   topActions:{ display:'flex', gap:'10px' },
   planBtn:{ padding:'10px 18px', border:`1.5px solid ${bdr}`, borderRadius:'8px', background:btn, fontSize:'14px', fontWeight:'600', color:btnTxt, cursor:'pointer' },
-  createBtn:{ padding:'10px 18px', border:'none', borderRadius:'8px', backgroundColor:'#4F46E5', color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
+  createBtn:{ padding:'10px 18px', border:'none', borderRadius:'8px', backgroundColor:'var(--cv-accent)', color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
   statsRow:{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'28px' },
   statCard:{ backgroundColor:surf, borderRadius:'12px', padding:'20px', border:`1px solid ${bdr}`, position:'relative', overflow:'hidden' },
   statIcon:{ fontSize:'24px', marginBottom:'8px' },
@@ -97,7 +115,7 @@ function getD(dk) {
   pinValue:{ fontSize:'22px', fontWeight:'900', color:txt, letterSpacing:'3px', marginTop:'4px' },
   cardStats:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'12px', fontSize:'12px', color:txt2 },
   modBadge:{ fontSize:'11px', color:txt2 },
-  joinBtn:{ width:'100%', padding:'10px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer' },
+  joinBtn:{ width:'100%', padding:'10px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer' },
   manageBtn:{ width:'100%', padding:'10px', backgroundColor:btn, color:btnTxt, border:`1.5px solid ${bdr}`, borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor:'pointer' },
   detailsBtn:{ width:'100%', padding:'10px', backgroundColor:btn, color:btnTxt, border:`1.5px solid ${bdr}`, borderRadius:'8px', fontSize:'13px', fontWeight:'600', cursor:'pointer' },
   emptyState:{ gridColumn:'1/-1', textAlign:'center', padding:'60px 20px' },
@@ -124,6 +142,14 @@ function getD(dk) {
   actTime:{ fontSize:'11px', color:txt3 },
   logoutBtn2:{ marginTop:24, width:'100%', padding:'10px', border:`1.5px solid ${bdr}`, borderRadius:'8px', background:btn, fontSize:'13px', fontWeight:'600', color:txt2, cursor:'pointer' },
   logoutBtn:{ margin:'6px 10px 10px', padding:'10px 14px', border:'1.5px solid #FCA5A5', borderRadius:'10px', background:'#FEF2F2', fontSize:'12px', fontWeight:'700', color:'#DC2626', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6, whiteSpace:'nowrap', overflow:'hidden', transition:'all 0.18s ease' },
+  // Settings cards (Notifications/Preferences/Privacy) — mirrors getSD's settingsCard*
+  // so the Teacher Settings page can render the exact same shared components
+  // (NotificationSettings/PreferencesSettings/PrivacySettings) the Student page already uses.
+  settingsCard:{ backgroundColor:surf, borderRadius:'12px', border:`1px solid ${bdr}`, overflow:'hidden', marginBottom:'0' },
+  settingsCardHeader:{ display:'flex', alignItems:'center', gap:'14px', padding:'16px 20px', borderBottom:`1px solid ${bdrLt}`, backgroundColor:infoBg },
+  settingsCardIcon:{ fontSize:'22px', width:36, height:36, backgroundColor:inv, borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  settingsCardTitle:{ fontSize:'15px', fontWeight:'700', color:txt },
+  settingsCardSub:{ fontSize:'12px', color:txt3, marginTop:2 },
   }; // end getD
 }
 
@@ -141,7 +167,7 @@ function getM(dk) {
   return {
   overlay:{ position:'fixed', inset:0, backgroundColor:'rgba(0,0,0,0.7)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:3000, padding:'16px' },
   modal:{ backgroundColor:surf, borderRadius:'16px', width:'100%', maxWidth:520, maxHeight:'85vh', display:'flex', flexDirection:'column', boxShadow:'0 20px 60px rgba(0,0,0,0.5)', overflow:'hidden' },
-  header:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:`1px solid ${bdr}`, backgroundColor:'#4F46E5' },
+  header:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'20px 24px', borderBottom:`1px solid ${bdr}`, backgroundColor:'var(--cv-accent)' },
   title:{ margin:0, fontSize:'18px', fontWeight:'700', color:'white' },
   closeBtn:{ background:'none', border:'none', fontSize:'22px', color:'white', cursor:'pointer' },
   body:{ padding:'24px', overflowY:'auto', flex:1, backgroundColor:surf },
@@ -150,7 +176,7 @@ function getM(dk) {
   sessionMeta:{ fontSize:'13px', color:txt2, marginTop:'4px' },
   msg:{ padding:'10px 14px', borderRadius:'8px', backgroundColor:dk?'#052e16':'#f0fdf4', fontSize:'14px', fontWeight:'500', marginBottom:'16px' },
   actions:{ display:'flex', flexDirection:'column', gap:'10px' },
-  primaryBtn:{ padding:'13px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'10px', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
+  primaryBtn:{ padding:'13px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'10px', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
   secondaryBtn:{ padding:'12px', backgroundColor:btn, color:btnTxt, border:`1.5px solid ${bdr}`, borderRadius:'10px', fontSize:'14px', fontWeight:'600', cursor:'pointer' },
   dangerBtn:{ padding:'12px', backgroundColor:btn, color:'#DC2626', border:'1.5px solid #FCA5A5', borderRadius:'10px', fontSize:'14px', fontWeight:'600', cursor:'pointer' },
   tabRow:{ display:'flex', borderBottom:`1px solid ${bdr}`, padding:'0 24px', backgroundColor:infoBg },
@@ -159,7 +185,7 @@ function getM(dk) {
   tabBody:{ padding:'16px 24px', overflowY:'auto', flex:1, maxHeight:'340px', backgroundColor:surf },
   empty:{ textAlign:'center', padding:'40px', color:txt3, fontSize:'14px' },
   memberRow:{ display:'flex', alignItems:'center', gap:'12px', padding:'10px 0', borderBottom:`1px solid ${bdrLt}` },
-  memberAvatar:{ width:36, height:36, borderRadius:'50%', backgroundColor:dk?'#1e3a5f':'#EEF2FF', color:'#818cf8', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', fontWeight:'700', flexShrink:0 },
+  memberAvatar:{ width:36, height:36, borderRadius:'50%', backgroundColor:dk?'#1e3a5f':'var(--cv-accent-light)', color:'#818cf8', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'16px', fontWeight:'700', flexShrink:0 },
   memberInfo:{ flex:1 },
   memberName:{ fontSize:'14px', fontWeight:'600', color:txt },
   memberEmail:{ fontSize:'12px', color:txt2, marginTop:'2px' },
@@ -181,7 +207,7 @@ function getSD(dk) {
   const txt  = dk ? '#f1f5f9' : '#111827';
   const txt2 = dk ? '#94a3b8' : '#6b7280';
   const txt3 = dk ? '#64748b' : '#9ca3af';
-  const inv  = dk ? '#1e3a5f' : '#EEF2FF';
+  const inv  = dk ? '#1e3a5f' : 'var(--cv-accent-light)';
   const btn  = dk ? '#1e293b' : 'white';
   const btnTxt=dk ? '#cbd5e1' : '#374151';
   const infoBg=dk ? '#0a111f' : '#f9fafb';
@@ -215,11 +241,13 @@ function getSD(dk) {
   activePulse:{ width:10, height:10, borderRadius:'50%', backgroundColor:'#10B981', display:'inline-block', boxShadow:'0 0 0 3px rgba(16,185,129,0.2)', animation:'pulse 2s infinite', flexShrink:0 },
   activeBannerTitle:{ fontSize:'14px', fontWeight:'700', color:dk?'#a5b4fc':'#3730a3' },
   activeBannerSub:{ fontSize:'12px', color:'#818cf8', marginTop:2 },
-  activeBannerBtn:{ padding:'8px 18px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer', flexShrink:0 },
+  activeBannerBtn:{ padding:'8px 18px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer', flexShrink:0 },
   contentRow:{ display:'flex', gap:'20px', alignItems:'flex-start' },
   mainCol:{ flex:1, minWidth:0 },
   rightCol:{ width:240, flexShrink:0 },
   joinCard:{ backgroundColor:surf, borderRadius:'14px', padding:'20px 22px', border:`1.5px solid ${bdr}`, marginBottom:'20px', boxShadow:'0 2px 8px rgba(99,102,241,0.07)', maxWidth:'360px' },
+  joinTabRow:{ display:'flex', gap:'6px', marginBottom:'14px', backgroundColor:dk?infoBg:'#f3f4f6', borderRadius:'8px', padding:'3px' },
+  joinTabBtn:(active)=>({ flex:1, padding:'7px 8px', borderRadius:'6px', border:'none', fontSize:'12px', fontWeight:'700', cursor:'pointer', backgroundColor:active?(dk?surf:'white'):'transparent', color:active?txt:txt3, boxShadow:active?'0 1px 3px rgba(0,0,0,0.08)':'none', transition:'all 0.15s' }),
   joinCardTitle:{ fontSize:'14px', fontWeight:'700', color:txt, marginBottom:'5px' },
   joinCardDesc:{ fontSize:'11px', color:txt3, marginBottom:'14px' },
   pinInput:{ width:'100%', padding:'12px 14px', fontSize:'20px', border:`1.5px solid ${bdr}`, borderRadius:'8px', outline:'none', marginBottom:'10px', boxSizing:'border-box', color:txt, backgroundColor:dk?infoBg:'white', letterSpacing:'8px', textAlign:'center', fontWeight:'800' },
@@ -237,7 +265,7 @@ function getSD(dk) {
   sessionListCard:{ backgroundColor:surf, borderRadius:'12px', padding:'14px', border:`1px solid ${bdr}` },
   sessionListHeader:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' },
   sessionListTitle:{ fontSize:'13px', fontWeight:'700', color:txt },
-  sessionListBadge:{ fontSize:'11px', fontWeight:'700', color:'white', backgroundColor:'#4F46E5', padding:'2px 8px', borderRadius:'20px' },
+  sessionListBadge:{ fontSize:'11px', fontWeight:'700', color:'white', backgroundColor:'var(--cv-accent)', padding:'2px 8px', borderRadius:'20px' },
   sessionListItem:{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 0', borderBottom:`1px solid ${bdrLt}` },
   sessionListDot:{ width:8, height:8, borderRadius:'50%', flexShrink:0 },
   sessionListInfo:{ flex:1, minWidth:0 },
@@ -254,9 +282,9 @@ function getSD(dk) {
   liveDot:{ width:6, height:6, borderRadius:'50%', backgroundColor:'#DC2626', display:'inline-block' },
   liveCardName:{ fontSize:'16px', fontWeight:'800', color:txt, marginBottom:'6px' },
   liveCardTeacher:{ display:'flex', alignItems:'center', gap:8, fontSize:'13px', color:txt2, marginBottom:'10px' },
-  teacherChip:{ width:22, height:22, borderRadius:'50%', backgroundColor:'#6366f1', color:'white', fontSize:'11px', fontWeight:'700', display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
+  teacherChip:{ width:22, height:22, borderRadius:'50%', backgroundColor:'var(--cv-accent-mid)', color:'white', fontSize:'11px', fontWeight:'700', display:'inline-flex', alignItems:'center', justifyContent:'center', flexShrink:0 },
   liveCardMeta:{ display:'flex', justifyContent:'space-between', fontSize:'11px', color:txt2, marginBottom:'14px' },
-  enterBtn:{ width:'100%', padding:'10px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer' },
+  enterBtn:{ width:'100%', padding:'10px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer' },
   onlineBadge:{ fontSize:'12px', fontWeight:'700', color:'#10B981', backgroundColor:dk?'#052e16':'#D1FAE5', padding:'3px 10px', borderRadius:'20px' },
   participantListWrap:{ backgroundColor:surf, borderRadius:'12px', border:`1px solid ${bdr}`, overflow:'hidden' },
   participantRow:{ display:'flex', alignItems:'center', gap:'14px', padding:'12px 16px', borderBottom:`1px solid ${bdrLt}` },
@@ -283,12 +311,12 @@ function getSD(dk) {
   settingsCardSub:{ fontSize:'12px', color:txt3, marginTop:2 },
   settingsCardBody:{ padding:'20px' },
   settingsAvatarRow:{ display:'flex', alignItems:'center', gap:'14px', marginBottom:'20px', padding:'14px', backgroundColor:infoBg, borderRadius:'10px', border:`1px solid ${bdrLt}` },
-  settingsAvatarBig:{ width:52, height:52, borderRadius:'50%', backgroundColor:'#6366f1', color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', fontWeight:'700', flexShrink:0 },
+  settingsAvatarBig:{ width:52, height:52, borderRadius:'50%', backgroundColor:'var(--cv-accent-mid)', color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'22px', fontWeight:'700', flexShrink:0 },
   profileField:{ marginBottom:'14px' },
   profileLabel:{ fontSize:'12px', fontWeight:'700', color:txt2, marginBottom:'5px', display:'block', textTransform:'uppercase', letterSpacing:'0.5px' },
   profileInput:{ width:'100%', padding:'10px 13px', fontSize:'14px', border:`1.5px solid ${bdr}`, borderRadius:'8px', outline:'none', color:txt, backgroundColor:dk?infoBg:'white', boxSizing:'border-box' },
   profileInputReadonly:{ backgroundColor:dk?'#0a111f':'#f8fafc', color:txt3, cursor:'not-allowed' },
-  profileSaveBtn:{ padding:'10px 24px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
+  profileSaveBtn:{ padding:'10px 24px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'8px', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
   profileMsg:{ marginTop:10, fontSize:13, fontWeight:'500', padding:'8px 12px', borderRadius:'6px', border:'1px solid transparent' },
   }; // end getSD
 }
@@ -297,29 +325,68 @@ function App() {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authScreen, setAuthScreen] = useState('home');
+  // Auth Spec v2 §3/§4 — verify-email and reset-password links from emailed links
+  // land on the bare site URL (?verifyToken=/?resetToken=), not on either entry
+  // point, since the emailed link doesn't know if the recipient is a teacher or
+  // student. Read and acted on inside the SAME effect that already parses
+  // ?pin= and restores an existing session below (not a separate effect) —
+  // two independent effects each reading window.location.search raced here:
+  // whichever ran first stripped the query string via replaceState before the
+  // second could see it, so the second always won with a plain 'home'/'student'
+  // reset. One effect, one read, no race.
+  const [authInitialMode, setAuthInitialMode] = useState('signin');
+  const [authInitialToken, setAuthInitialToken] = useState(null);
   const [groups, setGroups] = useState([]);
   const [currentGroup, setCurrentGroup] = useState(null);
   const [messages, setMessages] = useState([]);
   const [typingUsers, setTypingUsers] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
-  const [isDark, setIsDark] = useState(localStorage.getItem('theme') === 'dark');
+  const [themeMode, setThemeModeState] = useState(getStoredThemeMode);
+  const [isDark, setIsDark] = useState(() => resolveIsDark(getStoredThemeMode()));
 
-  const toggleTheme = () => setIsDark(v => !v);
+  // Settings → Preferences → Appearance: explicit 'light' | 'dark' | 'system' choice.
+  const setThemeMode = (mode) => {
+    setThemeModeState(mode);
+    localStorage.setItem('themeMode', mode);
+    setIsDark(resolveIsDark(mode));
+  };
+
+  // Header/sidebar quick-toggle — always resolves to an explicit mode (flips off
+  // 'system' rather than trying to "toggle" it).
+  const toggleTheme = () => setThemeMode(isDark ? 'light' : 'dark');
 
   // Sync theme with localStorage and body class
   useEffect(() => {
     document.body.classList.toggle('dark-mode', isDark);
+    // Legacy key — Home.jsx (pre-login marketing page) still reads only this one.
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   }, [isDark]);
+
+  // 'system' mode: follow the OS's prefers-color-scheme live, no refresh needed.
+  useEffect(() => {
+    if (themeMode !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => setIsDark(mq.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, [themeMode]);
+
+  // Settings → Preferences (Accent Color, Accessibility) — apply on startup so the
+  // choice is live from first paint, not only after the Settings page is opened.
+  useEffect(() => {
+    applyAccentColor(getStoredAccentColor());
+    applyAccessibilityPrefs(getStoredAccessibilityPrefs());
+  }, []);
 
   // Ping backend on app mount to wake Render from cold start before user tries to login
   useEffect(() => { pingBackend(); }, []);
 
-  // Listen for theme changes dispatched by Home.jsx so isDark stays in sync
-  // without requiring a re-login or page refresh
+  // Listen for theme changes dispatched by Home.jsx (pre-login) so isDark stays in
+  // sync without requiring a re-login or page refresh. Home.jsx only knows light/dark,
+  // never 'system', so this always resolves to an explicit mode.
   useEffect(() => {
-    const onTheme = (e) => setIsDark(Boolean(e.detail));
+    const onTheme = (e) => setThemeMode(Boolean(e.detail) ? 'dark' : 'light');
     window.addEventListener('classvibe-theme', onTheme);
     return () => window.removeEventListener('classvibe-theme', onTheme);
   }, []);
@@ -341,6 +408,10 @@ function App() {
   const [quizSessionId, setQuizSessionId] = useState(null);
   const [showQuizPlayer, setShowQuizPlayer] = useState(false);
   const [showAvatarBuilder, setShowAvatarBuilder] = useState(false);
+  // "Open Class Details" from a class-invitation notification — reuses the
+  // already-built UpcomingSessions view (was fetching real data all along, just
+  // never mounted anywhere in the app until now).
+  const [showUpcomingSessions, setShowUpcomingSessions] = useState(false);
   const [showRewardsLocker, setShowRewardsLocker] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showAccountSettings, setShowAccountSettings] = useState(false);
@@ -353,6 +424,14 @@ function App() {
   const [studentView, setStudentView] = useState('dashboard');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [pinInput, setPinInput] = useState('');
+  // Student Dashboard join card — 'live' (existing classroom PIN) vs 'quiz' (a
+  // teacher's one-off Instant Quiz PIN, which redirects straight into the quiz
+  // Lobby instead of the classroom chat view once joined).
+  const [joinTab, setJoinTab] = useState('live');
+  // Private Session system — set when a join attempt is blocked, so the UI can
+  // show the exact "not allowed" / "request sent, waiting for approval" message
+  // inline instead of a generic alert(). Cleared when the PIN input changes.
+  const [joinStatus, setJoinStatus] = useState(null); // { message, pendingApproval } | null
   const [profileName, setProfileName] = useState('');
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState('');
@@ -435,8 +514,12 @@ function App() {
     document.body.scrollTop = 0;
   }, [authScreen]);
 
-  // Stable ref so the joinSession event always has the latest selectGroup
+  // Stable refs so the joinSession event always calls the latest versions of
+  // these (the listener below is registered once with an empty dep array, so
+  // it'd otherwise close over stale first-render copies — same pattern used
+  // for selectGroupRef already).
   const selectGroupRef = useRef(null);
+  const joinGroupByPinRef = useRef(null);
 
   // IDENTICAL to previous
   useEffect(() => {
@@ -446,18 +529,38 @@ function App() {
     // its own onEnterLive callback) — kept only so any other lingering dispatcher of the
     // legacy 'startQuiz' window event doesn't throw.
     const startQuiz = () => {};
-    // Notification "Join Now" — enters the classroom directly
-    const joinSession = (e) => {
-      const groupId = e.detail?.groupId;
+    // Notification "Join Now" (session_started / access_approved / reminders) —
+    // must run the same access check as manual PIN entry, not just fetch group
+    // details straight from a bare groupId. Without this, an invited-but-never-
+    // manually-joined student would 403 on the exact button meant to let them
+    // in, and a Private Session's roster check would never run for this path.
+    const joinSession = async (e) => {
+      const { groupId, pin } = e.detail || {};
+      if (pin && joinGroupByPinRef.current) {
+        const { ok, data } = await joinGroupByPinRef.current(pin);
+        if (!ok) {
+          alert(data.error || 'Failed to join session');
+          return;
+        }
+        const joinedGroupId = data.group?._id ?? data.group?.id ?? groupId;
+        if (joinedGroupId && selectGroupRef.current) selectGroupRef.current(joinedGroupId);
+        return;
+      }
+      // No pin carried (older/other notification types) — fall back to the
+      // previous behavior of just navigating, for a student already a member.
       if (groupId && selectGroupRef.current) selectGroupRef.current(groupId);
     };
+    // "Open Class Details" on a class-invitation notification
+    const openClassDetails = () => setShowUpcomingSessions(true);
     window.addEventListener('openWaitingRoom', openWaitingRoom);
     window.addEventListener('startQuiz', startQuiz);
     window.addEventListener('joinSession', joinSession);
+    window.addEventListener('openClassDetails', openClassDetails);
     return () => {
       window.removeEventListener('openWaitingRoom', openWaitingRoom);
       window.removeEventListener('startQuiz', startQuiz);
       window.removeEventListener('joinSession', joinSession);
+      window.removeEventListener('openClassDetails', openClassDetails);
     };
   }, []);
 
@@ -491,11 +594,32 @@ function App() {
     } catch (e) { console.error('Load scheduled sessions error', e); }
   }, []);
 
-  // IDENTICAL to previous
   useEffect(() => {
+    const urlParams   = new URLSearchParams(window.location.search);
+    const verifyToken = urlParams.get('verifyToken');
+    const resetToken  = urlParams.get('resetToken');
+
+    // Auth Spec v2 §3/§4 — an emailed verify/reset link always wins over
+    // restoring an existing session: the user clicked that link with clear
+    // intent, so route straight into AuthScreen's matching mode and skip the
+    // session-restore branch below entirely for this initial load.
+    //
+    // Deliberately does NOT mutate the URL here (no history.replaceState) —
+    // React 18 StrictMode double-invokes this effect once in dev, and if the
+    // first invocation stripped the query string, the second invocation would
+    // read an already-empty URL and fall through to the plain 'home'/'student'
+    // branch below, undoing the first invocation's result. Reading the URL is
+    // safe to repeat; mutating it isn't. AuthScreen strips it later instead,
+    // from its own guarded one-time verify effect.
+    if (verifyToken || resetToken) {
+      setAuthInitialMode(verifyToken ? 'verify' : 'reset');
+      setAuthInitialToken(verifyToken || resetToken);
+      setAuthScreen('auth');
+      return;
+    }
+
     const savedToken = localStorage.getItem('token');
     const savedUser  = localStorage.getItem('user');
-    const urlParams  = new URLSearchParams(window.location.search);
     const pinFromUrl = urlParams.get('pin');
     if (savedToken) {
       try {
@@ -554,6 +678,9 @@ function App() {
     });
     socket.on('userStopTyping', (data) => { if (data?.username) setTypingUsers(prev => prev.filter(u => u !== data.username)); });
     socket.on('onlineUsersUpdate', (data) => { if (currentGroup) setCurrentGroup(prev => ({ ...prev, onlineUsers: data.onlineUsers })); });
+    socket.on('moderatedChatToggled', (data) => {
+      setCurrentGroup(prev => (prev && (prev._id ?? prev.id) === data.groupId) ? { ...prev, moderatedChat: data.moderatedChat } : prev);
+    });
     socket.on('sessionEnded', () => { alert('The admin has ended this session'); loadGroups(false); setCurrentGroup(null); setMessages([]); });
     socket.on('messageEdited', (msg) => setMessages(prev => prev.map(m => m._id === msg._id ? msg : m)));
     socket.on('messageDeleted', (data) => setMessages(prev => prev.map(m => m._id === data.messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m)));
@@ -562,7 +689,7 @@ function App() {
     socket.on('quizEnded', (data) => { console.log('🏁 Quiz ended:', data); alert('Quiz has ended! Check your results.'); });
     socket.on('leaderboardUpdate', (data) => console.log('📊 Leaderboard updated:', data));
     return () => {
-      ['newMessage','userJoined','userTyping','userStopTyping','onlineUsersUpdate','sessionEnded',
+      ['newMessage','userJoined','userTyping','userStopTyping','onlineUsersUpdate','moderatedChatToggled','sessionEnded',
        'messageEdited','messageDeleted','quizStarted','nextQuestion','quizEnded','leaderboardUpdate']
        .forEach(e => socket.off(e));
     };
@@ -597,15 +724,36 @@ function App() {
 
   const handleSendMessage = (messageData) => {
     if (!currentGroup) return;
-    const payload = {
+    const basePayload = {
       groupId: currentGroup._id ?? currentGroup.id,
       content: messageData.content, messageType: messageData.messageType,
-      recipientId: messageData.recipientId,
       fileUrl: messageData.fileUrl || null, fileName: messageData.fileName || null,
       fileSize: messageData.fileSize || null, fileType: messageData.fileType || null
     };
-    if (messageData.messageType === 'poll' && messageData.pollOptions) payload.pollOptions = messageData.pollOptions;
-    socket.emit('sendMessage', payload);
+    if (messageData.messageType === 'poll' && messageData.pollOptions) basePayload.pollOptions = messageData.pollOptions;
+
+    // Teacher Moderated Chat — a reply to several selected students is sent as
+    // one sendMessage call per recipient (fan-out), reusing the existing
+    // single-recipient socket handler unchanged.
+    const recipientIds = messageData.recipientIds || (messageData.recipientId ? [messageData.recipientId] : []);
+    if (recipientIds.length > 0) {
+      recipientIds.forEach(recipientId => socket.emit('sendMessage', { ...basePayload, recipientId }));
+    } else {
+      socket.emit('sendMessage', { ...basePayload, recipientId: null });
+    }
+  };
+
+  const handleToggleModeratedChat = async () => {
+    if (!currentGroup) return;
+    const groupId = currentGroup._id ?? currentGroup.id;
+    const nextEnabled = !currentGroup.moderatedChat;
+    try {
+      const r = await toggleModeratedChat(groupId, nextEnabled);
+      setCurrentGroup(prev => prev ? { ...prev, moderatedChat: r.moderatedChat } : prev);
+    } catch (err) {
+      console.error('Failed to toggle moderated chat:', err);
+      alert('Failed to update Moderated Chat setting: ' + (err.response?.data?.error || err.message));
+    }
   };
 
   const handleTyping    = () => { if (currentGroup) socket.emit('typing',     { groupId: currentGroup._id ?? currentGroup.id }); };
@@ -630,7 +778,10 @@ function App() {
   const handleMessageEdited  = (msg) => setMessages(prev => prev.map(m => m._id === msg._id ? msg : m));
   const handleMessageDeleted = (id)  => setMessages(prev => prev.map(m => m._id === id ? { ...m, isDeleted: true, content: 'This message was deleted' } : m));
 
-  const handleLogout = () => {
+  // useCallback (not a plain function, unlike most handlers in this file) so the
+  // multi-tab-logout-sync effect below can list it as a dependency without
+  // re-subscribing its storage listener on every single render.
+  const handleLogout = useCallback(() => {
     try { socket.disconnect(); } catch (e) {}
     // Persist current theme so Home page inherits it after logout
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
@@ -640,11 +791,29 @@ function App() {
     setActiveQuizSession(null); setLobbyCleared(false); setShowWaitingRoom(false); setShowQuizPlayer(false);
     setShowAvatarBuilder(false); setShowProfile(false); setShowAccountSettings(false); setShowRewardsLocker(false);
     setUser(null); setIsAuthenticated(false); setGroups([]); setCurrentGroup(null); setMessages([]); setAuthScreen('home');
-  };
+  }, [isDark]);
+
+  // Auth Spec v2 §7 (Session Management) — multi-tab sync: logout in one tab logs
+  // out all tabs. The browser's native 'storage' event fires in every OTHER tab of
+  // the same origin whenever localStorage changes (never in the tab that made the
+  // change), so no extra infrastructure (no socket event, no polling) is needed —
+  // when handleLogout's localStorage.removeItem('token') runs in tab A, tab B sees
+  // this event and runs its own handleLogout to match. Deliberately only reacts to
+  // the token being REMOVED (a logout), not to it changing to a new value — a login
+  // in one tab should not silently switch the account showing in another tab.
+  useEffect(() => {
+    const onStorageChange = (event) => {
+      if (event.key === 'token' && event.newValue === null) {
+        handleLogout();
+      }
+    };
+    window.addEventListener('storage', onStorageChange);
+    return () => window.removeEventListener('storage', onStorageChange);
+  }, [handleLogout]);
 
   const handleLoginSuccess = (loggedInUser, token) => {
     const t0 = performance.now();
-    setIsDark(localStorage.getItem('theme') === 'dark');
+    setIsDark(resolveIsDark(getStoredThemeMode()));
     if (token) localStorage.setItem('token', token);
     if (loggedInUser) { localStorage.setItem('user', JSON.stringify(loggedInUser)); setUser(loggedInUser); }
     else { const s = localStorage.getItem('user'); if (s) setUser(JSON.parse(s)); }
@@ -658,7 +827,7 @@ function App() {
 
   const handleGroupJoined = (group, returnedUser, token) => {
     const t0 = performance.now();
-    setIsDark(localStorage.getItem('theme') === 'dark');
+    setIsDark(resolveIsDark(getStoredThemeMode()));
     if (token) localStorage.setItem('token', token);
     if (returnedUser) { localStorage.setItem('user', JSON.stringify(returnedUser)); setUser(returnedUser); }
     else { const s = localStorage.getItem('user'); if (s) setUser(JSON.parse(s)); }
@@ -681,23 +850,83 @@ function App() {
     }
   };
 
+  // Private Session system — the one call every join path funnels through
+  // (manual PIN entry here, and the notification-driven "Join Now" flow below
+  // via the fixed joinSession listener) so the backend's invite/roster check
+  // always runs, never just a bare group-details fetch that'd skip it.
+  const joinGroupByPin = async (pin) => {
+    const token = localStorage.getItem('token');
+    const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
+    const res = await fetch(`${API}/api/groups/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ pin, name: user?.name || user?.username })
+    });
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, data };
+  };
+  // Kept fresh every render (unlike selectGroupRef, which only updates when
+  // selectGroup itself runs) so the joinSession listener can call it correctly
+  // even on a student's very first "Join Now" click, before any manual PIN entry.
+  joinGroupByPinRef.current = joinGroupByPin;
+
   const handleStudentPinJoin = async () => {
     const pin = pinInput.trim();
     if (!/^\d{6}$/.test(pin)) { alert('Please enter a valid 6-digit PIN'); return; }
+    setJoinStatus(null);
     try {
-      const token = localStorage.getItem('token');
-      const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
-      const res = await fetch(`${API}/api/groups/join`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({ pin, name: user?.name || user?.username })
-      });
-      const data = await res.json();
-      if (!res.ok) { alert(data.error || 'Failed to join session'); return; }
+      const { ok, data } = await joinGroupByPin(pin);
+      if (!ok) {
+        setJoinStatus({ message: data.error || 'Failed to join session', pendingApproval: !!data.pendingApproval });
+        return;
+      }
       setPinInput('');
       const groupId = data.group?._id ?? data.group?.id;
       if (groupId) { await loadGroups(false); selectGroup(groupId); }
-    } catch (err) { alert('Failed to join: ' + err.message); }
+    } catch (err) { setJoinStatus({ message: 'Failed to join: ' + err.message, pendingApproval: false }); }
+  };
+
+  // Same join mechanism as handleStudentPinJoin above (a PIN is just a PIN —
+  // /api/groups/join doesn't distinguish a regular classroom from a teacher's
+  // one-off Instant Quiz group), but instead of landing on the classroom chat
+  // view, immediately checks that group for a live quiz and drops the student
+  // straight into the Lobby overlay (activeQuizSession is rendered as an
+  // overlay regardless of currentGroup — see the JSX below — so this shows up
+  // in real time the moment the fetch resolves, no extra navigation needed).
+  const handleStudentQuizPinJoin = async () => {
+    const pin = pinInput.trim();
+    if (!/^\d{6}$/.test(pin)) { alert('Please enter a valid 6-digit PIN'); return; }
+    setJoinStatus(null);
+    try {
+      const { ok, data } = await joinGroupByPin(pin);
+      // Same error surface as "Join Live Session" — an invalid/unknown PIN is
+      // rejected identically by the same backend endpoint either way.
+      if (!ok) {
+        setJoinStatus({ message: data.error || 'Failed to join session', pendingApproval: !!data.pendingApproval });
+        return;
+      }
+      setPinInput('');
+      const groupId = data.group?._id ?? data.group?.id;
+      if (!groupId) return;
+      await loadGroups(false);
+      selectGroup(groupId);
+      try {
+        const token = localStorage.getItem('token');
+        const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
+        const activeRes = await fetch(`${API}/api/quiz/group/${groupId}/active`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const activeData = activeRes.ok ? await activeRes.json() : null;
+        if (activeData?.session) {
+          setLobbyCleared(activeData.session.status === 'active');
+          setActiveQuizSession(activeData.session);
+        } else {
+          alert('You\'ve joined, but there\'s no active quiz here yet. Ask your teacher to start it.');
+        }
+      } catch (activeErr) {
+        console.warn('Active quiz check after quiz-PIN join failed:', activeErr.message);
+      }
+    } catch (err) { setJoinStatus({ message: 'Failed to join: ' + err.message, pendingApproval: false }); }
   };
 
   const handleProfileSave = async () => {
@@ -981,13 +1210,29 @@ function App() {
 
       setDetailsData({
         members: grpData?.group?.members || group.members || [],
-        quizzes: quizData?.quizzes || quizData?.sessions || []
+        quizzes: quizData?.quizzes || quizData?.sessions || [],
+        // Private Session system — roster is only present when the backend
+        // recognizes this requester as the group's admin (see GET
+        // /api/groups/:groupId), so it's safe to just pass through as-is.
+        roster: grpData?.group?.roster || []
       });
     } catch (err) {
       console.error('Session details load error:', err);
-      setDetailsData({ members: group.members || [], quizzes: [] });
+      setDetailsData({ members: group.members || [], quizzes: [], roster: [] });
     } finally { setDetailsLoading(false); }
   };
+
+  // Private Session system — Session Details modal, while open, live-patches
+  // its roster as approve/reject/join/invite events happen, no re-fetch needed.
+  useEffect(() => {
+    const onRosterUpdate = (data) => {
+      const openGroupId = detailsGroup?._id ?? detailsGroup?.id;
+      if (!openGroupId || data.groupId !== openGroupId.toString()) return;
+      setDetailsData(prev => prev ? { ...prev, roster: data.roster } : prev);
+    };
+    socket.on('rosterUpdate', onRosterUpdate);
+    return () => socket.off('rosterUpdate', onRosterUpdate);
+  }, [detailsGroup]);
 
   // ── Theme-aware style objects (recomputed whenever isDark changes) ──
   const D = getD(isDark);
@@ -999,16 +1244,20 @@ function App() {
   // ─────────────────────────────────────────
   if (!isAuthenticated) {
     if (authScreen === 'home')    return <Home onTeacher={() => setAuthScreen('teacher')} onStudent={() => setAuthScreen('student')} />;
-    if (authScreen === 'teacher') return <TeacherLogin onAuthSuccess={handleLoginSuccess} onBack={() => setAuthScreen('home')} />;
-    if (authScreen === 'student') return <StudentJoin onJoinSuccess={handleGroupJoined} onBack={() => setAuthScreen('home')} />;
-    return (
-      <div>
-        <Login onLoginSuccess={handleLoginSuccess} />
-        <div style={{ textAlign:'center', marginTop:12 }}>
-          <button onClick={() => setAuthScreen('teacher')} style={{ padding:'8px 12px', cursor:'pointer' }}>Teacher Login</button>
-        </div>
-      </div>
-    );
+    // Auth Spec v2 §1 — one shared component for both entry points; role only
+    // affects copy/icon and which role a NEW account gets on sign-up. PIN joining
+    // (StudentJoin.jsx's old primary flow) now happens post-authentication, inside
+    // the Student Dashboard's existing "Join Live Session" box — unchanged, still
+    // wired to handleStudentPinJoin below.
+    if (authScreen === 'teacher') return <AuthScreen role="teacher" onAuthSuccess={handleLoginSuccess} onBack={() => setAuthScreen('home')} />;
+    if (authScreen === 'student') return <AuthScreen role="student" onAuthSuccess={handleLoginSuccess} onBack={() => setAuthScreen('home')} />;
+    // Reached only via an emailed verify-email/reset-password link — role is
+    // irrelevant here (see AuthScreen's own comment), the real role always comes
+    // back from the server once the user actually signs in afterward.
+    if (authScreen === 'auth')    return <AuthScreen role="student" onAuthSuccess={handleLoginSuccess} onBack={() => setAuthScreen('home')} initialMode={authInitialMode} initialToken={authInitialToken} />;
+    // authScreen only ever takes the four values handled above — this is a
+    // defensive fallback for any unexpected value, not a real code path.
+    return <Home onTeacher={() => setAuthScreen('teacher')} onStudent={() => setAuthScreen('student')} />;
   }
 
   // ─────────────────────────────────────────
@@ -1032,9 +1281,12 @@ function App() {
         isDark={isDark}
         onToggleTheme={toggleTheme}
         onOpenProfile={() => setShowProfile(true)}
+        moderatedChat={!!currentGroup?.moderatedChat}
+        onToggleModeratedChat={handleToggleModeratedChat}
       />
 
       {showAvatarBuilder && <AvatarBuilder onClose={() => setShowAvatarBuilder(false)} />}
+      {showUpcomingSessions && <UpcomingSessions onClose={() => setShowUpcomingSessions(false)} />}
 
       {showProfile && user?.role === 'teacher' && (
         <TeacherProfile
@@ -1228,6 +1480,11 @@ function App() {
               <button style={{ ...M.tab, ...(detailsTab === 'members' ? M.tabActive : {}) }} onClick={() => setDetailsTab('members')}>
                 👥 Members ({(detailsData?.members || detailsGroup?.members || []).length})
               </button>
+              {detailsGroup.isPrivate && (
+                <button style={{ ...M.tab, ...(detailsTab === 'roster' ? M.tabActive : {}) }} onClick={() => setDetailsTab('roster')}>
+                  📋 Invited/Joined ({(detailsData?.roster || []).length})
+                </button>
+              )}
               <button style={{ ...M.tab, ...(detailsTab === 'quizzes' ? M.tabActive : {}) }} onClick={() => setDetailsTab('quizzes')}>
                 📝 Quiz History ({(detailsData?.quizzes || []).length})
               </button>
@@ -1236,6 +1493,49 @@ function App() {
             <div style={M.tabBody}>
               {detailsLoading ? (
                 <div style={{ textAlign:'center', padding:'40px', color:'#6b7280' }}>Loading...</div>
+              ) : detailsTab === 'roster' ? (
+                <div>
+                  {/* Private Session system — status badges: 🟢 Joined (online) /
+                      ⚫ Joined (offline) / 🟡 Invited / ⏳ Waiting for approval / 🔴 Declined */}
+                  <div style={{ fontSize:12, fontWeight:'700', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.5px', margin:'4px 0 8px' }}>Invited Students</div>
+                  {(detailsData?.roster || []).length === 0 ? (
+                    <div style={M.empty}>No students invited yet</div>
+                  ) : (
+                    (detailsData.roster).map((r, i) => {
+                      const name = r.user?.name || r.user?.username || r.email;
+                      const badge = r.status === 'joined'
+                        ? (r.online ? '🟢 Joined' : '⚫ Joined (offline)')
+                        : r.status === 'requested' ? '⏳ Waiting for approval'
+                        : r.status === 'declined' ? '🔴 Declined'
+                        : '🟡 Invited';
+                      return (
+                        <div key={r.email + i} style={M.memberRow}>
+                          <div style={M.memberAvatar}>{name.charAt(0).toUpperCase()}</div>
+                          <div style={M.memberInfo}>
+                            <div style={M.memberName}>{name}</div>
+                            <div style={M.memberEmail}>{r.email}</div>
+                          </div>
+                          <div style={M.memberTime}>{badge}</div>
+                        </div>
+                      );
+                    })
+                  )}
+
+                  <div style={{ fontSize:12, fontWeight:'700', color:'#6b7280', textTransform:'uppercase', letterSpacing:'0.5px', margin:'20px 0 8px' }}>Joined Students</div>
+                  {(detailsData?.roster || []).filter(r => r.status === 'joined').length === 0 ? (
+                    <div style={M.empty}>No one has joined yet</div>
+                  ) : (
+                    (detailsData.roster).filter(r => r.status === 'joined').map((r, i) => (
+                      <div key={'joined-' + r.email + i} style={M.memberRow}>
+                        <div style={M.memberAvatar}>{(r.user?.name || r.user?.username || r.email).charAt(0).toUpperCase()}</div>
+                        <div style={M.memberInfo}>
+                          <div style={M.memberName}>{r.user?.name || r.user?.username || r.email}</div>
+                        </div>
+                        <div style={M.memberTime}>{r.online ? '🟢 Online' : '⚫ Offline'}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
               ) : detailsTab === 'members' ? (
                 <div>
                   {(detailsData?.members || detailsGroup?.members || []).length === 0 ? (
@@ -1312,7 +1612,7 @@ function App() {
                 ].map((item, i) => (
                   <button key={i}
                     title={!teacherSidebarOpen ? item.label : undefined}
-                    style={{ ...D.navItem, justifyContent: teacherSidebarOpen ? 'flex-start' : 'center', backgroundColor: teacherView === item.view ? '#EEF2FF' : 'transparent', color: teacherView === item.view ? '#4F46E5' : '#6b7280', fontWeight: teacherView === item.view ? '700' : '500', whiteSpace:'nowrap' }}
+                    style={{ ...D.navItem, justifyContent: teacherSidebarOpen ? 'flex-start' : 'center', backgroundColor: teacherView === item.view ? 'var(--cv-accent-light)' : 'transparent', color: teacherView === item.view ? 'var(--cv-accent)' : '#6b7280', fontWeight: teacherView === item.view ? '700' : '500', whiteSpace:'nowrap' }}
                     onClick={() => setTeacherView(item.view)}
                   >
                     <span style={D.navIcon}>{item.icon}</span>
@@ -1334,10 +1634,6 @@ function App() {
                   </div>
                 )}
 
-                <button onClick={toggleTheme} title="Toggle dark/light mode"
-                  style={{ ...D.themeToggleBtn, margin: teacherSidebarOpen ? undefined : '4px 8px', whiteSpace:'nowrap' }}>
-                  {teacherSidebarOpen ? (isDark ? '☀️ Light Mode' : '🌙 Dark Mode') : (isDark ? '☀️' : '🌙')}
-                </button>
                 <button onClick={handleLogout} className="teacher-logout-btn" style={{ ...D.logoutBtn, margin: teacherSidebarOpen ? undefined : '4px 8px', whiteSpace:'nowrap' }}>
                   {teacherSidebarOpen ? '→ Logout' : '🚪'}
                 </button>
@@ -1434,7 +1730,7 @@ function App() {
                             </div>
                             <div style={D.cardStats}>
                               <span>👥 {(group.members || []).length} Students</span>
-                              <span style={D.modBadge}>🛡 Moderation On</span>
+                              {group.moderatedChat && <span style={D.modBadge}>🛡 Moderated</span>}
                             </div>
                             <button style={D.joinBtn} onClick={() => selectGroup(group._id ?? group.id)}>
                               Join Session
@@ -1585,6 +1881,7 @@ function App() {
                           <div style={D.cardStats}><span>👥 {(g.members||[]).length} students</span><span style={{ fontSize:11, color:'#9ca3af' }}>{formatDateTime(g.createdAt).date}</span></div>
                           <div style={{ display:'flex', gap:8 }}>
                             <button style={{ ...D.joinBtn, flex:1 }} onClick={() => selectGroup(g._id ?? g.id)}>Enter Session</button>
+                            <button style={{ ...D.detailsBtn, flex:1 }} onClick={() => openSessionDetails(g)}>Session Details</button>
                             <button style={{ ...D.manageBtn, width:40, padding:'10px', fontSize:16 }} onClick={(e) => handleDeleteLiveGroup(g, e)} title="End & Delete">🗑</button>
                           </div>
                         </div>
@@ -1775,8 +2072,8 @@ function App() {
                         <svg width="100%" height={CH} viewBox={`0 0 ${CW} ${CH}`} preserveAspectRatio="none" style={{ marginTop:8 }}>
                           {[0,0.25,0.5,0.75,1].map((f,i) => <line key={i} x1={P.l} y1={P.t+ch*(1-f)} x2={P.l+cw} y2={P.t+ch*(1-f)} stroke="#f3f4f6" strokeWidth="1"/>)}
                           <path d={wArea} fill="rgba(99,102,241,0.08)" />
-                          <polyline points={wLine} fill="none" stroke="#6366f1" strokeWidth="2.5" strokeLinejoin="round"/>
-                          {wPts.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="4" fill="white" stroke="#6366f1" strokeWidth="2"/>)}
+                          <polyline points={wLine} fill="none" stroke="var(--cv-accent-mid)" strokeWidth="2.5" strokeLinejoin="round"/>
+                          {wPts.map((p,i) => <circle key={i} cx={p.x} cy={p.y} r="4" fill="white" stroke="var(--cv-accent-mid)" strokeWidth="2"/>)}
                           {weeklyData.map((d,i) => <text key={i} x={wPts[i].x} y={CH-6} textAnchor="middle" fontSize="10" fill="#9ca3af">{d.day}</text>)}
                           {[0,Math.round(maxW/2),maxW].map((v,i) => {
                             const y=P.t+ch-(v/maxW)*ch;
@@ -1801,9 +2098,9 @@ function App() {
                                 const x=BP.l+i*gap+gap*0.225, y=BP.t+bh-barH;
                                 return (
                                   <g key={i}>
-                                    <rect x={x} y={y} width={barW} height={barH} fill={d.count>0?'#6366f1':'#e5e7eb'} rx="3"/>
+                                    <rect x={x} y={y} width={barW} height={barH} fill={d.count>0?'var(--cv-accent-mid)':'#e5e7eb'} rx="3"/>
                                     <text x={x+barW/2} y={BH-6} textAnchor="middle" fontSize="9" fill="#9ca3af">{d.range}</text>
-                                    {d.count>0 && <text x={x+barW/2} y={y-4} textAnchor="middle" fontSize="10" fill="#6366f1" fontWeight="700">{d.count}</text>}
+                                    {d.count>0 && <text x={x+barW/2} y={y-4} textAnchor="middle" fontSize="10" fill="var(--cv-accent-mid)" fontWeight="700">{d.count}</text>}
                                   </g>
                                 );
                               })}
@@ -1828,12 +2125,12 @@ function App() {
                                   <td style={{ padding:'7px 8px',width:40,fontSize:15 }}>{i===0?'🥇':i===1?'🥈':i===2?'🥉':`#${i+1}`}</td>
                                   <td style={{ padding:'7px 8px' }}>
                                     <div style={{ display:'flex',alignItems:'center',gap:8 }}>
-                                      <div style={{ width:28,height:28,borderRadius:'50%',backgroundColor:'#EEF2FF',color:'#6366f1',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:'700',flexShrink:0 }}>{p.name.charAt(0).toUpperCase()}</div>
+                                      <div style={{ width:28,height:28,borderRadius:'50%',backgroundColor:'var(--cv-accent-light)',color:'var(--cv-accent-mid)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:'700',flexShrink:0 }}>{p.name.charAt(0).toUpperCase()}</div>
                                       <span style={{ fontSize:13,fontWeight:'600',color:'#111827' }}>{p.name}</span>
                                     </div>
                                   </td>
                                   <td style={{ padding:'10px 8px',fontSize:12,color:'#6b7280' }}>{p.quizzes}</td>
-                                  <td style={{ padding:'10px 8px',fontSize:13,fontWeight:'700',color:'#6366f1' }}>{p.points}</td>
+                                  <td style={{ padding:'10px 8px',fontSize:13,fontWeight:'700',color:'var(--cv-accent-mid)' }}>{p.points}</td>
                                 </tr>
                               ))}
                             </tbody>
@@ -1868,7 +2165,7 @@ function App() {
                         <div style={{ display:'flex',justifyContent:'center',margin:'16px 0 12px' }}>
                           <svg width={DSZ} height={DSZ}>
                             <circle cx={Dc} cy={Dc} r={Drad} fill="none" stroke="#f3f4f6" strokeWidth={DSW}/>
-                            <circle cx={Dc} cy={Dc} r={Drad} fill="none" stroke="#6366f1" strokeWidth={DSW}
+                            <circle cx={Dc} cy={Dc} r={Drad} fill="none" stroke="var(--cv-accent-mid)" strokeWidth={DSW}
                               strokeDasharray={`${Ddash} ${Dcirc}`} strokeDashoffset={Dcirc/4} strokeLinecap="round"/>
                             <text x={Dc} y={Dc+7} textAnchor="middle" fontSize="20" fontWeight="800" fill={isDark ? '#f1f5f9' : '#111827'}>{masteryPct}%</text>
                             <text x={Dc} y={Dc+22} textAnchor="middle" fontSize="9" fill={isDark ? '#64748b' : '#9ca3af'}>Progress</text>
@@ -1944,11 +2241,11 @@ function App() {
                   </div>
 
                   {liveGroups.length > 0 && (
-                    <div style={{ backgroundColor:'#EEF2FF',borderRadius:12,padding:'16px 20px',border:'1px solid #c7d2fe',marginTop:20 }}>
+                    <div style={{ backgroundColor:'var(--cv-accent-light)',borderRadius:12,padding:'16px 20px',border:'1px solid #c7d2fe',marginTop:20 }}>
                       <div style={{ fontWeight:'700',color:'#3730a3',marginBottom:4 }}>Live sessions active — open per-class analytics</div>
                       <div style={{ display:'flex',gap:10,flexWrap:'wrap',marginTop:10 }}>
                         {liveGroups.map(g=>(
-                          <button key={g._id} style={{ ...D.planBtn,backgroundColor:'#4F46E5',color:'white',border:'none' }}
+                          <button key={g._id} style={{ ...D.planBtn,backgroundColor:'var(--cv-accent)',color:'white',border:'none' }}
                             onClick={()=>selectGroup(g._id??g.id)}>
                             📊 Enter {g.groupName}
                           </button>
@@ -1986,6 +2283,43 @@ function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* Section 2: Notifications — same shared component/backend as Student Settings,
+                      so each teacher's own toggles apply to their own account in real time. */}
+                  <div style={{ ...D.settingsCard, marginTop:12 }}>
+                    <div style={D.settingsCardHeader}>
+                      <div style={D.settingsCardIcon}>🔔</div>
+                      <div>
+                        <div style={D.settingsCardTitle}>Notifications</div>
+                        <div style={D.settingsCardSub}>Email and push notification preferences</div>
+                      </div>
+                    </div>
+                    <NotificationSettings isDark={isDark} />
+                  </div>
+
+                  {/* Section 3: Preferences */}
+                  <div style={{ ...D.settingsCard, marginTop:12 }}>
+                    <div style={D.settingsCardHeader}>
+                      <div style={D.settingsCardIcon}>🎨</div>
+                      <div>
+                        <div style={D.settingsCardTitle}>Preferences</div>
+                        <div style={D.settingsCardSub}>Theme, language, and display settings</div>
+                      </div>
+                    </div>
+                    <PreferencesSettings isDark={isDark} themeMode={themeMode} setThemeMode={setThemeMode} />
+                  </div>
+
+                  {/* Section 4: Privacy */}
+                  <div style={{ ...D.settingsCard, marginTop:12 }}>
+                    <div style={D.settingsCardHeader}>
+                      <div style={D.settingsCardIcon}>🔒</div>
+                      <div>
+                        <div style={D.settingsCardTitle}>Privacy</div>
+                        <div style={D.settingsCardSub}>Control your data and privacy settings</div>
+                      </div>
+                    </div>
+                    <PrivacySettings isDark={isDark} />
+                  </div>
                 </>)}
 
               </div>
@@ -2013,7 +2347,7 @@ function App() {
                 ].map((item, i) => (
                   <button key={i}
                     title={sidebarCollapsed ? item.label : undefined}
-                    style={{ ...SD.navItem, justifyContent: sidebarCollapsed ? 'center' : 'flex-start', backgroundColor: studentView === item.view ? '#EEF2FF' : 'transparent', color: studentView === item.view ? '#4F46E5' : '#6b7280', fontWeight: studentView === item.view ? '700' : '500' }}
+                    style={{ ...SD.navItem, justifyContent: sidebarCollapsed ? 'center' : 'flex-start', backgroundColor: studentView === item.view ? 'var(--cv-accent-light)' : 'transparent', color: studentView === item.view ? 'var(--cv-accent)' : '#6b7280', fontWeight: studentView === item.view ? '700' : '500' }}
                     onClick={() => setStudentView(item.view)}>
                     <span style={SD.navIcon}>{item.icon}</span>
                     {!sidebarCollapsed && <span>{item.label}</span>}
@@ -2033,11 +2367,6 @@ function App() {
                     <div style={SD.userAvatar} title={displayName}>{displayName.charAt(0).toUpperCase()}</div>
                   </div>
                 )}
-
-                {/* Theme toggle */}
-                <button onClick={toggleTheme} title="Toggle dark/light mode" style={SD.themeToggleBtn}>
-                  {sidebarCollapsed ? (isDark ? '☀️' : '🌙') : (isDark ? '☀️ Light Mode' : '🌙 Dark Mode')}
-                </button>
 
                 {/* Logout */}
                 <button onClick={handleLogout} style={SD.logoutBtn} title={sidebarCollapsed ? 'Logout' : undefined}>
@@ -2073,7 +2402,7 @@ function App() {
                       </div>
                     )) : [
                       { label:'ACTIVE SESSIONS',  value:liveGroups.length,  icon:'⚡', color:'#10B981', bg:'#D1FAE5' },
-                      { label:'SESSIONS JOINED',  value:groups.length,       icon:'📚', color:'#6366f1', bg:'#EEF2FF' },
+                      { label:'SESSIONS JOINED',  value:groups.length,       icon:'📚', color:'var(--cv-accent-mid)', bg:'var(--cv-accent-light)' },
                       { label:'COMPLETED',        value:endedGroups.length,  icon:'✅', color:'#6b7280', bg:'#F3F4F6' },
                       { label:'UPCOMING',         value:0,                   icon:'📅', color:'#F59E0B', bg:'#FEF3C7' },
                     ].map((s, i) => (
@@ -2102,14 +2431,37 @@ function App() {
 
                   <div style={SD.contentRow}>
                     <div style={SD.mainCol}>
-                      {/* Join Session card — compact */}
+                      {/* Join Session card — compact, two tabs sharing the pinInput field */}
                       <div style={SD.joinCard}>
-                        <div style={SD.joinCardTitle}>🔑 Join Live Session</div>
-                        <p style={SD.joinCardDesc}>Enter your 6-digit session PIN from the teacher.</p>
-                        <input style={SD.pinInput} placeholder="• • • • • •" maxLength={6} value={pinInput} onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))} onKeyDown={e => e.key === 'Enter' && handleStudentPinJoin()} />
-                        <button style={{ ...SD.joinSessionBtn, backgroundColor: pinInput.length === 6 ? '#4F46E5' : '#e5e7eb', color: pinInput.length === 6 ? 'white' : '#9ca3af', border:'none' }} onClick={handleStudentPinJoin}>
-                          Join Session
+                        <div style={SD.joinTabRow}>
+                          <button style={SD.joinTabBtn(joinTab === 'live')} onClick={() => { setJoinTab('live'); setPinInput(''); setJoinStatus(null); }}>
+                            🔑 Join Live Session
+                          </button>
+                          <button style={SD.joinTabBtn(joinTab === 'quiz')} onClick={() => { setJoinTab('quiz'); setPinInput(''); setJoinStatus(null); }}>
+                            🎮 Join Instant Quiz
+                          </button>
+                        </div>
+                        <p style={SD.joinCardDesc}>
+                          {joinTab === 'live'
+                            ? 'Enter your 6-digit session PIN from the teacher.'
+                            : 'Enter the 6-digit PIN for your teacher\'s Instant Quiz — you\'ll be taken straight to the quiz lobby.'}
+                        </p>
+                        <input style={SD.pinInput} placeholder="• • • • • •" maxLength={6} value={pinInput}
+                          onChange={e => { setPinInput(e.target.value.replace(/\D/g, '')); setJoinStatus(null); }}
+                          onKeyDown={e => e.key === 'Enter' && (joinTab === 'live' ? handleStudentPinJoin() : handleStudentQuizPinJoin())} />
+                        <button style={{ ...SD.joinSessionBtn, backgroundColor: pinInput.length === 6 ? 'var(--cv-accent)' : '#e5e7eb', color: pinInput.length === 6 ? 'white' : '#9ca3af', border:'none' }}
+                          onClick={joinTab === 'live' ? handleStudentPinJoin : handleStudentQuizPinJoin}>
+                          {joinTab === 'live' ? 'Join Session' : 'Join Quiz'}
                         </button>
+                        {joinStatus && (
+                          <div style={{
+                            marginTop: 10, padding: '10px 12px', borderRadius: 8, fontSize: 12.5, lineHeight: 1.4,
+                            backgroundColor: joinStatus.pendingApproval ? '#FEF3C7' : '#FEF2F2',
+                            color: joinStatus.pendingApproval ? '#92400E' : '#B91C1C'
+                          }}>
+                            {joinStatus.pendingApproval ? '⏳ Request sent — ' : '⚠️ '}{joinStatus.message}
+                          </div>
+                        )}
                       </div>
 
                       {/* My Classes — skeleton while loading */}
@@ -2281,7 +2633,7 @@ function App() {
                       return mId && onlineIds.has(mId);
                     });
                     const adminId = String(group.admin?._id ?? group.admin?.id ?? group.admin ?? '');
-                    const colors = ['#6366f1','#10B981','#F59E0B','#EF4444','#3B82F6','#8B5CF6','#EC4899','#14B8A6'];
+                    const colors = ['var(--cv-accent-mid)','#10B981','#F59E0B','#EF4444','#3B82F6','#8B5CF6','#EC4899','#14B8A6'];
                     return (
                       <div key={group._id} style={{ marginBottom:32 }}>
                         <div style={SD.sectionBar}>
@@ -2460,7 +2812,7 @@ function App() {
                           </span>
                           <span style={{ width:72 }}>
                             {g.isActive && (
-                              <button style={{ fontSize:11, padding:'5px 10px', backgroundColor:'#4F46E5', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'700' }} onClick={() => selectGroup(g._id ?? g.id)}>
+                              <button style={{ fontSize:11, padding:'5px 10px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', fontWeight:'700' }} onClick={() => selectGroup(g._id ?? g.id)}>
                                 Enter
                               </button>
                             )}
@@ -2518,26 +2870,41 @@ function App() {
                     </div>
                   </div>
 
-                  {/* Sections 2-4: Coming Soon */}
-                  {[
-                    { icon:'🔔', title:'Notifications', sub:'Email and push notification preferences' },
-                    { icon:'🎨', title:'Preferences',   sub:'Theme, language, and display settings' },
-                    { icon:'🔒', title:'Privacy',       sub:'Control your data and privacy settings' },
-                  ].map((sec, i) => (
-                    <div key={i} style={{ ...SD.settingsCard, marginTop:12 }}>
-                      <div style={SD.settingsCardHeader}>
-                        <div style={SD.settingsCardIcon}>{sec.icon}</div>
-                        <div>
-                          <div style={SD.settingsCardTitle}>{sec.title}</div>
-                          <div style={SD.settingsCardSub}>{sec.sub}</div>
-                        </div>
-                      </div>
-                      <div style={{ ...SD.settingsCardBody, display:'flex', alignItems:'center', gap:10, padding:'16px 24px' }}>
-                        <span style={{ fontSize:20 }}>🚧</span>
-                        <span style={{ fontSize:13, color:'#9ca3af', fontWeight:'500' }}>Coming Soon — this section is under development</span>
+                  {/* Section 2: Notifications — FUNCTIONAL */}
+                  <div style={{ ...SD.settingsCard, marginTop:12 }}>
+                    <div style={SD.settingsCardHeader}>
+                      <div style={SD.settingsCardIcon}>🔔</div>
+                      <div>
+                        <div style={SD.settingsCardTitle}>Notifications</div>
+                        <div style={SD.settingsCardSub}>Email and push notification preferences</div>
                       </div>
                     </div>
-                  ))}
+                    <NotificationSettings isDark={isDark} />
+                  </div>
+
+                  {/* Section 3: Preferences — FUNCTIONAL */}
+                  <div style={{ ...SD.settingsCard, marginTop:12 }}>
+                    <div style={SD.settingsCardHeader}>
+                      <div style={SD.settingsCardIcon}>🎨</div>
+                      <div>
+                        <div style={SD.settingsCardTitle}>Preferences</div>
+                        <div style={SD.settingsCardSub}>Theme, language, and display settings</div>
+                      </div>
+                    </div>
+                    <PreferencesSettings isDark={isDark} themeMode={themeMode} setThemeMode={setThemeMode} />
+                  </div>
+
+                  {/* Section 4: Privacy — FUNCTIONAL */}
+                  <div style={{ ...SD.settingsCard, marginTop:12 }}>
+                    <div style={SD.settingsCardHeader}>
+                      <div style={SD.settingsCardIcon}>🔒</div>
+                      <div>
+                        <div style={SD.settingsCardTitle}>Privacy</div>
+                        <div style={SD.settingsCardSub}>Control your data and privacy settings</div>
+                      </div>
+                    </div>
+                    <PrivacySettings isDark={isDark} />
+                  </div>
                 </>)}
 
               </div>
@@ -2547,8 +2914,8 @@ function App() {
         ) : (
           /* ── CHAT VIEW — IDENTICAL ── */
           <>
-            <ChatArea messages={messages} currentUserId={getUserId(user)} currentGroup={currentGroup} typingUsers={typingUsers} onMessageEdited={handleMessageEdited} onMessageDeleted={handleMessageDeleted} />
-            <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} onStopTyping={handleStopTyping} disabled={!currentGroup || !currentGroup.isActive} isAdmin={isAdmin} members={currentGroup.members || []} />
+            <ChatArea messages={messages} currentUserId={getUserId(user)} currentGroup={currentGroup} typingUsers={typingUsers} onMessageEdited={handleMessageEdited} onMessageDeleted={handleMessageDeleted} moderatedChat={!!currentGroup.moderatedChat} isAdmin={isAdmin} />
+            <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} onStopTyping={handleStopTyping} disabled={!currentGroup || !currentGroup.isActive} isAdmin={isAdmin} members={(currentGroup.members || []).map(m => m.user).filter(Boolean)} moderatedChat={!!currentGroup.moderatedChat} adminId={currentGroup.admin?._id} />
           </>
         )}
       </div>

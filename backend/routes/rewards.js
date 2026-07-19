@@ -7,17 +7,10 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
-const { authenticateToken } = require('../middleware/auth');
+const { authenticateToken, isStudent } = require('../middleware/auth');
 const QuizResult = require('../models/QuizResult');
 const { BADGE_CATALOG } = require('../badgeCatalog');
 const { AVATAR_ITEM_CATALOG } = require('../avatarCatalog');
-
-const isStudent = (req, res, next) => {
-  if (!req.user || req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Access denied. Student role required.' });
-  }
-  next();
-};
 
 // Milestone 12: every badge-gated cosmetic across every slot, cross-referenced
 // against what's actually earned/already-seen — no separate unlock economy,

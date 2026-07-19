@@ -610,7 +610,7 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
                 {teamLeaderboard.length > 0 && (
                   <div style={S.teamColumnsRow}>
                     {teamLeaderboard.map((team) => (
-                      <div key={team.teamId} style={{ ...S.teamColumn, borderColor: team.color || '#4F46E5' }}>
+                      <div key={team.teamId} style={{ ...S.teamColumn, borderColor: team.color || 'var(--cv-accent)' }}>
                         <div style={S.teamColumnHeader}>#{team.rank} {team.icon} {team.name}</div>
                         <div style={S.teamColumnScore}>{team.averageScore} avg pts</div>
                         <div style={S.teamColumnMembers}>
@@ -881,7 +881,7 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
                   <button
                     onClick={handleNextQuestion}
                     disabled={actionLoading}
-                    style={{ ...S.primaryBtn, backgroundColor: '#4F46E5' }}
+                    style={{ ...S.primaryBtn, backgroundColor: 'var(--cv-accent)' }}
                   >
                     {actionLoading ? '...' : 'Next Question →'}
                   </button>
@@ -906,7 +906,7 @@ const QuizControlPanel = ({ groupId, onClose, onStartQuiz }) => {
             {quizStatus === 'finished' && (
               <button
                 onClick={() => { onClose(); onStartQuiz?.(); }}
-                style={{ ...S.primaryBtn, backgroundColor: '#4F46E5' }}
+                style={{ ...S.primaryBtn, backgroundColor: 'var(--cv-accent)' }}
               >
                 🔄 Recreate Quiz
               </button>
@@ -943,7 +943,7 @@ const S = {
   panelHeader: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
     padding: '20px 24px 12px',
-    background: 'linear-gradient(135deg, #4F46E5, #7C3AED)',
+    background: 'linear-gradient(135deg, var(--cv-accent), #7C3AED)',
     color: 'white'
   },
   panelTitle: { margin: 0, fontSize: 20, fontWeight: 700, color: 'white' },
@@ -965,7 +965,7 @@ const S = {
     color: '#666', cursor: 'pointer', borderBottom: '3px solid transparent',
     marginBottom: -2, transition: 'all .2s'
   },
-  tabBtnActive: { color: '#4F46E5', borderBottomColor: '#4F46E5', fontWeight: 700 },
+  tabBtnActive: { color: 'var(--cv-accent)', borderBottomColor: 'var(--cv-accent)', fontWeight: 700 },
 
   scrollBody: { flex: 1, overflowY: 'auto', padding: '20px 24px' },
 
@@ -976,7 +976,7 @@ const S = {
   },
   spinner: {
     width: 40, height: 40,
-    border: '4px solid #e0e0e0', borderTop: '4px solid #4F46E5',
+    border: '4px solid #e0e0e0', borderTop: '4px solid var(--cv-accent)',
     borderRadius: '50%', animation: 'spin 1s linear infinite'
   },
 
@@ -998,7 +998,7 @@ const S = {
     textAlign: 'center', border: '1px solid #eee'
   },
   statEmoji: { fontSize: 24, marginBottom: 6 },
-  statValue: { fontSize: 22, fontWeight: 700, color: '#4F46E5' },
+  statValue: { fontSize: 22, fontWeight: 700, color: 'var(--cv-accent)' },
   statLabel: { fontSize: 12, color: '#666', marginTop: 2 },
 
   section: { marginBottom: 22 },
@@ -1023,7 +1023,7 @@ const S = {
     fontSize: 12, fontWeight: 700, flexShrink: 0
   },
   studentName: { fontSize: 13, fontWeight: 500, color: '#333', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  studentScore: { fontSize: 11, fontWeight: 700, color: '#4F46E5' },
+  studentScore: { fontSize: 11, fontWeight: 700, color: 'var(--cv-accent)' },
 
   progressTrack: { height: 12, backgroundColor: '#e0e0e0', borderRadius: 6, overflow: 'hidden', marginBottom: 8 },
   progressFill: { height: '100%', backgroundColor: '#25D366', borderRadius: 6, transition: 'width .5s ease' },
@@ -1062,13 +1062,13 @@ const S = {
   },
   lbRank: { fontSize: 20, minWidth: 32, textAlign: 'center' },
   lbName: { flex: 1, fontSize: 14, fontWeight: 500, color: '#333' },
-  lbScore: { fontSize: 15, fontWeight: 700, color: '#4F46E5' },
+  lbScore: { fontSize: 15, fontWeight: 700, color: 'var(--cv-accent)' },
   lbStreak: { fontSize: 13, color: '#FFA500', fontWeight: 600 },
 
   // ✅ NEW: Question Summary flash (teacher, while active)
   qSummaryRow: { display: 'flex', gap: 10, marginBottom: 10 },
   qSummaryStat: { flex: 1, textAlign: 'center', padding: '12px', backgroundColor: '#F9FAFB', borderRadius: 10, border: '1px solid #eee' },
-  qSummaryValue: { fontSize: 22, fontWeight: 800, color: '#4F46E5' },
+  qSummaryValue: { fontSize: 22, fontWeight: 800, color: 'var(--cv-accent)' },
   qSummaryLabel: { fontSize: 11, color: '#6B7280', fontWeight: 600, marginTop: 2 },
   qSummaryFastest: { fontSize: 12, color: '#92400E', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', borderRadius: 8, padding: '8px 12px', margin: 0 },
   mvpCallout: { fontSize: 13, color: '#92400E', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', borderRadius: 8, padding: '8px 12px', marginBottom: 10 },
@@ -1097,7 +1097,7 @@ const S = {
   teamColumnMembers: { display: 'flex', flexDirection: 'column', gap: 5 },
   teamColumnMemberRow: { display: 'flex', alignItems: 'center', gap: 5 },
   teamColumnMemberName: { fontSize: 11, color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  teamColumnMemberScore: { fontSize: 11, fontWeight: 700, color: '#4F46E5' },
+  teamColumnMemberScore: { fontSize: 11, fontWeight: 700, color: 'var(--cv-accent)' },
   teamCelebrationCard: { textAlign: 'center', marginBottom: 20, padding: '20px 16px', backgroundColor: '#F9FAFB', borderRadius: 14 },
   teamCelebrationIcon: { fontSize: 32, marginBottom: 4 },
   teamCelebrationName: { fontSize: 18, fontWeight: 800, color: '#1a1a1a' },
@@ -1107,7 +1107,7 @@ const S = {
   questionsList: { display: 'flex', flexDirection: 'column', gap: 8 },
   questionItem: { display: 'flex', alignItems: 'flex-start', gap: 10, padding: 12, backgroundColor: '#f8f9fa', borderRadius: 8, border: '1px solid #eee' },
   questionItemNum: {
-    padding: '4px 10px', backgroundColor: '#4F46E5', color: 'white',
+    padding: '4px 10px', backgroundColor: 'var(--cv-accent)', color: 'white',
     borderRadius: 8, fontSize: 12, fontWeight: 700, flexShrink: 0
   },
   questionItemText: { flex: 1, fontSize: 14, color: '#333' },
@@ -1167,7 +1167,7 @@ const S = {
   },
   createBtn: {
     padding: '12px 24px', fontSize: 15, fontWeight: 700,
-    backgroundColor: '#4F46E5', color: 'white', border: 'none',
+    backgroundColor: 'var(--cv-accent)', color: 'white', border: 'none',
     borderRadius: 10, cursor: 'pointer'
   }
 };

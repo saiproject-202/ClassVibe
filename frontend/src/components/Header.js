@@ -47,6 +47,9 @@ const Header = ({
   isDark,              // global dark mode flag
   onToggleTheme,       // theme toggle callback
   onOpenProfile,       // opens the Teacher/Student Profile overlay (App.js)
+  // ── Teacher Moderated Chat ──
+  moderatedChat,        // current on/off state for this session
+  onToggleModeratedChat,// teacher-only toggle callback
 }) => {
 
   // ── Resolve user: prop → localStorage → null ────────────────────────────
@@ -246,6 +249,17 @@ const Header = ({
                 </button>
               )}
 
+              {/* Teacher Moderated Chat toggle — teacher/admin only */}
+              {isAdmin && onToggleModeratedChat && (
+                <button
+                  onClick={onToggleModeratedChat}
+                  style={moderatedChat ? S.modChatBtnOn : S.modChatBtnOff}
+                  title={moderatedChat ? 'Moderated Chat is ON — student messages are private to you' : 'Turn on Moderated Chat — hide student messages from each other'}
+                >
+                  🛡 Moderated Chat: {moderatedChat ? 'On' : 'Off'}
+                </button>
+              )}
+
               {/* End Session — teacher/admin only */}
               {isAdmin && onEndSession && (
                 <button
@@ -436,7 +450,7 @@ const S = {
   userRoleLabel:  { fontSize: 11, textTransform: 'capitalize', whiteSpace: 'nowrap' },
   avatarWrap:     { position: 'relative', flexShrink: 0, border: 'none', background: 'transparent', padding: 0, cursor: 'pointer' },
   avatarImg:      { width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '2px solid #e2e8f0', display: 'block' },
-  avatarFallback: { width: 36, height: 36, borderRadius: '50%', backgroundColor: '#6366f1', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: '700' },
+  avatarFallback: { width: 36, height: 36, borderRadius: '50%', backgroundColor: 'var(--cv-accent-mid)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: '700' },
   onlineDot:      { position: 'absolute', bottom: 0, right: 0, width: 10, height: 10, backgroundColor: '#22c55e', borderRadius: '50%', border: '2px solid white' },
 
   // Hamburger
@@ -485,6 +499,18 @@ const S = {
     backgroundColor: '#f97316', color: '#ffffff',
     border: 'none', borderRadius: 7, cursor: 'pointer',
     transition: 'background 0.15s',
+  },
+  modChatBtnOff: {
+    padding: '7px 13px', fontSize: 12, fontWeight: '600',
+    backgroundColor: 'transparent', color: '#64748b',
+    border: '1px solid #e2e8f0', borderRadius: 7, cursor: 'pointer',
+    whiteSpace: 'nowrap', transition: 'background 0.15s',
+  },
+  modChatBtnOn: {
+    padding: '7px 13px', fontSize: 12, fontWeight: '700',
+    backgroundColor: '#eef2ff', color: '#4f46e5',
+    border: '1px solid #c7d2fe', borderRadius: 7, cursor: 'pointer',
+    whiteSpace: 'nowrap', transition: 'background 0.15s',
   },
   searchBtn: {
     width: 34, height: 34, fontSize: 16, color: '#475569',
@@ -567,7 +593,7 @@ const M = {
   footer: { padding: '14px 24px 20px' },
   doneBtn: {
     width: '100%', padding: 12, fontSize: 14, fontWeight: '700',
-    backgroundColor: '#6366f1', color: 'white',
+    backgroundColor: 'var(--cv-accent-mid)', color: 'white',
     border: 'none', borderRadius: 10, cursor: 'pointer',
   },
 };

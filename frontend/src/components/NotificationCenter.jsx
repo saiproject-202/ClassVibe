@@ -3,10 +3,16 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 
+const API_URL = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
+
 const NotificationCenter = ({ onClose, onNotificationRead, onMarkAllRead }) => {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all');
+  // Private Session system — join_request cards resolve in place (Approve/
+  // Reject) rather than navigating anywhere, so track outcome per notification
+  // id here instead of relying on a page reload to reflect it.
+  const [resolvedRequests, setResolvedRequests] = useState({}); // { [notificationId]: 'approved' | 'declined' }
 
   // ✅ FIX: useCallback
   const fetchNotifications = useCallback(async () => {
@@ -65,10 +71,13 @@ const NotificationCenter = ({ onClose, onNotificationRead, onMarkAllRead }) => {
 
     console.log("📍 Notification clicked:", notification);
 
-    if (notification.type === 'session_started') {
+    if (notification.type === 'session_started' || notification.type === 'access_approved') {
       const groupId = notification.metadata?.groupId || notification.relatedGroup?._id || notification.relatedGroup;
+      const pin = notification.metadata?.pin;
       if (groupId) {
-        window.dispatchEvent(new CustomEvent('joinSession', { detail: { groupId } }));
+        // pin (when present) makes the join actually re-run the access check —
+        // see App.js's joinSession listener — instead of just navigating.
+        window.dispatchEvent(new CustomEvent('joinSession', { detail: { groupId, pin } }));
       }
       onClose();
     } else if (notification.type === 'quiz_started') {
@@ -77,8 +86,37 @@ const NotificationCenter = ({ onClose, onNotificationRead, onMarkAllRead }) => {
         window.dispatchEvent(new CustomEvent('openWaitingRoom', { detail: { sessionId } }));
       }
       onClose();
+    } else if (notification.type === 'session_scheduled') {
+      window.dispatchEvent(new CustomEvent('openClassDetails', { detail: { sessionId: notification.metadata?.sessionId } }));
+      onClose();
+    } else if (notification.type === 'join_request') {
+      // Resolves in place via the Approve/Reject buttons below — don't navigate
+      // or close the panel on a plain card click.
     } else {
       onClose();
+    }
+  };
+
+  // Private Session system — teacher approves/rejects an uninvited student's
+  // join attempt directly from the notification card.
+  const respondToRequest = async (notification, action) => {
+    const { groupId, email } = notification.metadata || {};
+    if (!groupId || !email) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(
+        `${API_URL}/api/groups/${groupId}/roster/${encodeURIComponent(email)}/${action}`,
+        { method: 'POST', headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        setResolvedRequests(prev => ({ ...prev, [notification._id]: action === 'approve' ? 'approved' : 'declined' }));
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || `Failed to ${action} request`);
+      }
+    } catch (error) {
+      console.error(`${action} request error:`, error);
+      alert(`Failed to ${action} request`);
     }
   };
 
@@ -136,7 +174,10 @@ const getNotificationIcon = (type) => {
     session_ended: '🏁',
     session_cancelled: '❌',
     attention_needed: '⚠️',
-    achievement: '🏆'
+    achievement: '🏆',
+    join_request: '🔔',
+    access_approved: '✅',
+    access_declined: '🚫'
   };
   return icons[type] || '🔔';
 };
@@ -244,14 +285,37 @@ const getNotificationIcon = (type) => {
                       📚 {notification.relatedGroup.groupName}
                     </div>
                   )}
-                  {/* Join Now button for live session notifications */}
-                  {notification.type === 'session_started' && (
+                  {/* Join Now button for live session / just-approved notifications */}
+                  {(notification.type === 'session_started' || notification.type === 'access_approved') && (
                     <button
                       onClick={(e) => { e.stopPropagation(); handleNotificationClick(notification); }}
                       style={styles.joinNowBtn}
                     >
                       Join Now →
                     </button>
+                  )}
+                  {/* Private Session system — Approve/Reject an uninvited join attempt */}
+                  {notification.type === 'join_request' && (
+                    resolvedRequests[notification._id] ? (
+                      <div style={styles.requestResolvedLabel}>
+                        {resolvedRequests[notification._id] === 'approved' ? '✅ Approved' : '🚫 Declined'}
+                      </div>
+                    ) : (
+                      <div style={styles.requestActions}>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); respondToRequest(notification, 'approve'); }}
+                          style={styles.approveBtn}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); respondToRequest(notification, 'reject'); }}
+                          style={styles.rejectBtn}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    )
                   )}
                 </div>
                 {!notification.isRead && (
@@ -431,7 +495,7 @@ const styles = {
   joinNowBtn: {
     marginTop: '8px',
     padding: '6px 14px',
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -439,6 +503,37 @@ const styles = {
     fontWeight: '700',
     cursor: 'pointer',
     display: 'inline-block'
+  },
+  requestActions: {
+    display: 'flex',
+    gap: '8px',
+    marginTop: '8px'
+  },
+  approveBtn: {
+    padding: '6px 14px',
+    backgroundColor: '#10B981',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer'
+  },
+  rejectBtn: {
+    padding: '6px 14px',
+    backgroundColor: 'transparent',
+    color: '#dc2626',
+    border: '1.5px solid #dc2626',
+    borderRadius: '6px',
+    fontSize: '12px',
+    fontWeight: '700',
+    cursor: 'pointer'
+  },
+  requestResolvedLabel: {
+    marginTop: '8px',
+    fontSize: '12px',
+    fontWeight: '700',
+    color: '#6b7280'
   }
 };
 

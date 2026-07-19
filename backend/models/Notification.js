@@ -31,7 +31,10 @@ const notificationSchema = new mongoose.Schema({
       'session_ended',        // Session ended
       'session_cancelled',    // Session cancelled
       'attention_needed',     // Teacher flagged student
-      'achievement'           // Badge/achievement earned
+      'achievement',          // Badge/achievement earned
+      'join_request',         // Private Session: uninvited student wants to join (teacher-facing)
+      'access_approved',      // Private Session: teacher approved a pending join request
+      'access_declined'       // Private Session: teacher rejected a pending join request
     ],
     required: true
   },
@@ -152,37 +155,78 @@ notificationSchema.statics.deleteOldRead = async function(daysOld = 30) {
   });
 };
 
-// Create notification (helper)
+// Fire a notification email without blocking notification creation on delivery —
+// mirrors the verification/reset email pattern (services/emailService.js), which
+// already no-ops to a console log when SMTP isn't configured.
+function emailNotification(recipientUser, data) {
+  const { sendEmail } = require('../services/emailService');
+  sendEmail({
+    to: recipientUser.email,
+    subject: data.title,
+    text: data.message,
+    html: `<p>${data.message}</p>`
+  }).catch(err => console.error('Notification email failed:', err));
+}
+
+// Create notification (helper) — respects the recipient's Settings → Notifications
+// preferences (models/User.js notificationPreferences): skipped entirely if their
+// master switch is off, real-time socket push gated by pushNotifications, email
+// gated by emailNotifications.
 notificationSchema.statics.createNotification = async function(data) {
+  const User = require('./User');
+  const recipientUser = await User.findById(data.recipient).select('notificationPreferences email');
+  if (!recipientUser) return null;
+
+  const prefs = recipientUser.notificationPreferences || {};
+  if (prefs.notificationsEnabled === false) return null;
+
   const notification = new this(data);
   await notification.save();
-  
-  // Emit socket event
+
   const io = global.io;
-  if (io) {
+  if (io && prefs.pushNotifications !== false) {
     io.to(data.recipient.toString()).emit('newNotification', notification);
   }
-  
+
+  if (prefs.emailNotifications !== false && recipientUser.email) {
+    emailNotification(recipientUser, data);
+  }
+
   return notification;
 };
 
-// Bulk create notifications
+// Bulk create notifications — same preference gating as createNotification, applied
+// per-recipient (a recipient with notifications off is skipped, others still get one).
 notificationSchema.statics.createBulkNotifications = async function(recipients, data) {
-  const notifications = recipients.map(recipientId => ({
+  const User = require('./User');
+  const users = await User.find({ _id: { $in: recipients } }).select('notificationPreferences email');
+  const userById = new Map(users.map(u => [u._id.toString(), u]));
+
+  const eligibleRecipients = recipients.filter(id => {
+    const u = userById.get(id.toString());
+    return u && u.notificationPreferences?.notificationsEnabled !== false;
+  });
+  if (eligibleRecipients.length === 0) return [];
+
+  const notifications = eligibleRecipients.map(recipientId => ({
     ...data,
     recipient: recipientId
   }));
-  
+
   const created = await this.insertMany(notifications);
-  
-  // Emit socket events
+
   const io = global.io;
-  if (io) {
-    recipients.forEach((recipientId, index) => {
+  eligibleRecipients.forEach((recipientId, index) => {
+    const u = userById.get(recipientId.toString());
+    const prefs = u.notificationPreferences || {};
+    if (io && prefs.pushNotifications !== false) {
       io.to(recipientId.toString()).emit('newNotification', created[index]);
-    });
-  }
-  
+    }
+    if (prefs.emailNotifications !== false && u.email) {
+      emailNotification(u, data);
+    }
+  });
+
   return created;
 };
 
@@ -237,17 +281,17 @@ notificationSchema.statics.notifyQuizResult = async function(studentId, quiz, sc
 };
 
 // Session starting soon notification
-notificationSchema.statics.notifySessionStartingSoon = async function(session, studentIds) {
+notificationSchema.statics.notifySessionStartingSoon = async function(session, studentIds, minutesLeft = 15) {
   const teacher = session.teacherName || 'Your teacher';
   return this.createBulkNotifications(studentIds, {
     type: 'session_starting',
-    title: '⏰ Session Starting in 15 Minutes!',
-    message: `${teacher}'s "${session.sessionName}" starts soon${session.scheduledTime ? ' at ' + session.scheduledTime : ''}.`,
+    title: `⏰ "${session.sessionName}" Starts in ${minutesLeft} Minutes!`,
+    message: `Your class "${session.sessionName}" starts in ${minutesLeft} minute${minutesLeft === 1 ? '' : 's'}${session.scheduledTime ? ' (' + session.scheduledTime + ')' : ''}. Taught by ${teacher}.`,
     relatedSession: session._id,
     actionUrl: `/schedule`,
     priority: 'high',
     icon: '⏰',
-    metadata: { sessionId: session._id?.toString(), sessionName: session.sessionName }
+    metadata: { sessionId: session._id?.toString(), sessionName: session.sessionName, minutesLeft }
   });
 };
 

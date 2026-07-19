@@ -47,7 +47,7 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
     teamMode: {
       teamCount: 2,
       teams: [
-        { name: '', color: '#4F46E5', icon: '🚀' },
+        { name: '', color: 'var(--cv-accent)', icon: '🚀' },
         { name: '', color: '#EF4444', icon: '☄️' }
       ],
       allowStudentChoice: true,
@@ -59,7 +59,7 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
   // ✅ NEW (Phase 3): preset color swatches offered per team row — keeps the UI to a
   // one-click choice instead of a full color picker, matching the "under one minute to
   // configure" design requirement (§12.4)
-  const TEAM_COLOR_PRESETS = ['#4F46E5', '#EF4444', '#10B981', '#F59E0B'];
+  const TEAM_COLOR_PRESETS = ['var(--cv-accent)', '#EF4444', '#10B981', '#F59E0B'];
 
   // ✅ NEW (Phase 4): School House Mode's default preset — teacher can still rename/
   // recolor every field, this just saves them from starting on a blank form
@@ -1368,8 +1368,8 @@ const styles = {
     gap: '8px'
   },
   tabActive: {
-    color: '#4F46E5',
-    borderBottomColor: '#4F46E5',
+    color: 'var(--cv-accent)',
+    borderBottomColor: 'var(--cv-accent)',
     backgroundColor: '#fff'
   },
   tabIcon: {
@@ -1421,9 +1421,9 @@ const styles = {
     color: '#666'
   },
   inputMethodBtnActive: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#EEF2FF',
-    color: '#4F46E5'
+    borderColor: 'var(--cv-accent)',
+    backgroundColor: 'var(--cv-accent-light)',
+    color: 'var(--cv-accent)'
   },
   formGroup: {
     marginBottom: '24px'
@@ -1501,7 +1501,7 @@ const styles = {
   urlHint: {
     marginTop: '12px',
     padding: '12px',
-    backgroundColor: '#EEF2FF',
+    backgroundColor: 'var(--cv-accent-light)',
     borderRadius: '8px',
     fontSize: '13px',
     color: '#4b5563',
@@ -1510,7 +1510,7 @@ const styles = {
   urlHintTitle: {
     fontWeight: '600',
     marginBottom: '8px',
-    color: '#4F46E5'
+    color: 'var(--cv-accent)'
   },
   suggestionsBox: {
     padding: '20px',
@@ -1551,7 +1551,7 @@ const styles = {
     padding: '18px',
     fontSize: '16px',
     fontWeight: '700',
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: 'white',
     border: 'none',
     borderRadius: '12px',
@@ -1604,10 +1604,10 @@ const styles = {
   },
   addQuestionBtn: {
     padding: '10px 20px',
-    border: '2px solid #4F46E5',
+    border: '2px solid var(--cv-accent)',
     borderRadius: '10px',
     background: '#fff',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer'
@@ -1643,7 +1643,7 @@ const styles = {
     gap: '10px'
   },
   questionNumber: {
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: '#fff',
     padding: '4px 10px',
     borderRadius: '6px',
@@ -1719,10 +1719,10 @@ const styles = {
     width: '100%',
     padding: '12px',
     fontSize: '15px',
-    border: '2px solid #4F46E5',
+    border: '2px solid var(--cv-accent)',
     borderRadius: '8px',
     outline: 'none',
-    backgroundColor: '#EEF2FF'
+    backgroundColor: 'var(--cv-accent-light)'
   },
   fillInBlankHint: {
     marginTop: '8px',
@@ -1733,10 +1733,10 @@ const styles = {
   multiSelectHint: {
     fontSize: '13px',
     fontWeight: '600',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     marginBottom: '12px',
     padding: '8px 12px',
-    backgroundColor: '#EEF2FF',
+    backgroundColor: 'var(--cv-accent-light)',
     borderRadius: '6px'
   },
   optionsList: {
@@ -1835,7 +1835,7 @@ const styles = {
   previewQuestionNumber: {
     fontSize: '11px',
     fontWeight: '700',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     letterSpacing: '0.5px'
   },
   // ✅ Animated Timer
@@ -1881,10 +1881,10 @@ const styles = {
   previewMultiSelectHint: {
     fontSize: '12px',
     fontWeight: '600',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     marginBottom: '12px',
     padding: '8px',
-    backgroundColor: '#EEF2FF',
+    backgroundColor: 'var(--cv-accent-light)',
     borderRadius: '6px',
     textAlign: 'center'
   },
@@ -1931,7 +1931,7 @@ const styles = {
   previewNextBtn: {
     width: '100%',
     padding: '14px',
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: '#fff',
     border: 'none',
     borderRadius: '10px',
@@ -1946,10 +1946,10 @@ const styles = {
   },
   timerControlBtn: {
     padding: '10px 24px',
-    border: '2px solid #4F46E5',
+    border: '2px solid var(--cv-accent)',
     borderRadius: '8px',
     background: '#fff',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     fontSize: '14px',
     fontWeight: '600',
     cursor: 'pointer'
@@ -2008,7 +2008,7 @@ const styles = {
     width: '20px',
     height: '20px',
     cursor: 'pointer',
-    accentColor: '#4F46E5'
+    accentColor: 'var(--cv-accent)'
   },
 
   // ✅ NEW (Phase 3): Quiz Mode card + team setup
@@ -2025,7 +2025,7 @@ const styles = {
     padding: '16px', borderRadius: '10px', border: '2px solid #e5e7eb',
     cursor: 'pointer', transition: 'all 0.15s'
   },
-  quizModeOptionActive: { border: '2px solid #4F46E5', backgroundColor: '#EEF2FF' },
+  quizModeOptionActive: { border: '2px solid var(--cv-accent)', backgroundColor: 'var(--cv-accent-light)' },
   quizModeOptionTitle: { fontSize: '15px', fontWeight: '700', color: '#1F2937', marginBottom: '4px' },
   quizModeOptionDesc: { fontSize: '13px', color: '#6B7280', lineHeight: '1.4' },
 
@@ -2040,7 +2040,7 @@ const styles = {
     width: '36px', height: '36px', borderRadius: '8px', border: '2px solid #e5e7eb',
     backgroundColor: '#fff', color: '#374151', fontWeight: '700', cursor: 'pointer'
   },
-  teamCountBtnActive: { border: '2px solid #4F46E5', backgroundColor: '#4F46E5', color: '#fff' },
+  teamCountBtnActive: { border: '2px solid var(--cv-accent)', backgroundColor: 'var(--cv-accent)', color: '#fff' },
 
   teamRows: { display: 'flex', flexDirection: 'column', gap: '10px' },
   teamRow: { display: 'flex', alignItems: 'center', gap: '10px' },
@@ -2096,7 +2096,7 @@ const styles = {
     padding: '12px 32px',
     border: 'none',
     borderRadius: '10px',
-    background: '#4F46E5',
+    background: 'var(--cv-accent)',
     fontSize: '15px',
     fontWeight: '700',
     color: '#fff',
@@ -2109,12 +2109,12 @@ const styles = {
   },
   saveBtn: {
     padding: '12px 24px',
-    border: '2px solid #4F46E5',
+    border: '2px solid var(--cv-accent)',
     borderRadius: '10px',
     background: '#fff',
     fontSize: '15px',
     fontWeight: '600',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     cursor: 'pointer'
   },
   publishBtn: {

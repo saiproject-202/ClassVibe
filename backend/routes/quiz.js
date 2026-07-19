@@ -12,8 +12,8 @@ const QuizResult = require('../models/QuizResult');
 const Group = require('../models/Group');
 const User = require('../models/User');
 const { generator } = require('../services/aiQuizGenerator');
-const jwt = require('jsonwebtoken');
 const QRCode = require('qrcode');
+const { authenticateToken } = require('../middleware/auth');
 
 // ========================================
 // FILE UPLOAD SETUP
@@ -50,26 +50,11 @@ const upload = multer({
 });
 
 // ========================================
-// MIDDLEWARE
+// MIDDLEWARE — Final audit: was a locally-duplicated JWT verifier (only set
+// req.userId, no DB lookup, own copy of process.env.JWT_SECRET), now the
+// canonical authenticateToken imported above. Every handler in this file only
+// ever reads req.userId, which the canonical middleware still sets identically.
 // ========================================
-
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied - no token provided' });
-  }
-  
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.userId || decoded.id;
-    next();
-  } catch (error) {
-    console.error('Token verification error:', error.message);
-    res.status(403).json({ error: 'Invalid or expired token' });
-  }
-};
 
 // ========================================
 // QUIZ GENERATION ROUTES
@@ -198,6 +183,10 @@ router.post('/generate-from-file', authenticateToken, upload.single('file'), asy
     
     // Verify user is teacher
     const user = await User.findById(req.userId);
+    if (!user) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(401).json({ error: 'User not found' });
+    }
     if (user.role !== 'teacher') {
       // Clean up uploaded file
       await fs.unlink(req.file.path).catch(() => {});
@@ -351,7 +340,8 @@ router.delete('/:quizId', authenticateToken, async (req, res) => {
 router.get('/recent-topics', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
-    
+    if (!user) return res.status(401).json({ error: 'User not found' });
+
     if (user.role !== 'teacher') {
       return res.status(403).json({ error: 'Only teachers can access this' });
     }

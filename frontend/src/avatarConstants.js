@@ -38,6 +38,6 @@ export const CELEBRATION_EMOTES = [
 // itemId only since every background item today has a single 'default' color
 // variant. Must stay in sync with backend/avatarCatalog.js's background entries.
 export const BACKGROUND_SWATCH_HEX = {
-  classroom01: '#EEF2FF',
+  classroom01: 'var(--cv-accent-light)',
   starry01: '#1E1B3A'
 };

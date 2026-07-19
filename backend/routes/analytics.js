@@ -8,40 +8,15 @@ const Group = require('../models/Group');
 const User = require('../models/User');
 const QuizResult = require('../models/QuizResult');
 const Message = require('../models/Message');
-const jwt = require('jsonwebtoken');
+const { authenticateToken, isTeacher } = require('../middleware/auth');
 
 // ========================================
-// MIDDLEWARE
-// ========================================
-
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied' });
-  }
-  
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (error) {
-    res.status(403).json({ error: 'Invalid token' });
-  }
-};
-
-// Check if user is teacher
-const isTeacher = async (req, res, next) => {
-  const user = await User.findById(req.userId);
-  if (!user || user.role !== 'teacher') {
-    return res.status(403).json({ error: 'Teacher access required' });
-  }
-  next();
-};
-
-// ========================================
-// ANALYTICS ROUTES
+// MIDDLEWARE — Final audit: was a locally-duplicated JWT verifier AND a
+// locally-duplicated isTeacher (which did its own extra User.findById lookup
+// since its local authenticateToken never set req.user) — now both canonical,
+// imported above. Every handler in this file only ever reads req.userId, which
+// the canonical middleware still sets identically (plus req.user, unused here
+// but harmless).
 // ========================================
 
 // Get group analytics summary (teacher only)

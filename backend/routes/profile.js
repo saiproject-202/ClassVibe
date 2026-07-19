@@ -5,19 +5,12 @@
 
 const express = require('express');
 const router = express.Router();
-const { authenticateToken, isTeacher } = require('../middleware/auth');
+const { authenticateToken, isTeacher, isStudent } = require('../middleware/auth');
 const User = require('../models/User');
 const Group = require('../models/Group');
 const Quiz = require('../models/Quiz');
 const QuizResult = require('../models/QuizResult');
 const Analytics = require('../models/Analytics');
-
-const isStudent = (req, res, next) => {
-  if (!req.user || req.user.role !== 'student') {
-    return res.status(403).json({ error: 'Access denied. Student role required.' });
-  }
-  next();
-};
 
 // ------------------
 // GET /api/profile/teacher

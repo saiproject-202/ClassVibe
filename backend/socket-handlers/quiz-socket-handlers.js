@@ -15,6 +15,23 @@ const QuizResult  = require('../models/QuizResult');
 const Analytics   = require('../models/Analytics');
 const Message     = require('../models/Message');
 const User        = require('../models/User');
+const Group       = require('../models/Group');
+
+// Quick-quiz groups are one-off, auto-created backing rooms for a single Instant Quiz
+// (hidden from the teacher's "My Classes" list, so there's no manual "End Session" button
+// for them). Once their one quiz completes, end the group too — otherwise it stays
+// isActive:true forever and keeps showing as "LIVE" on students' dashboards.
+async function endQuickQuizGroupIfDone(session) {
+  if (!session.group) return;
+  try {
+    const group = await Group.findById(session.group);
+    if (group && group.isQuickQuiz && group.isActive) {
+      await group.endSession();
+    }
+  } catch (err) {
+    console.error('❌ Failed to auto-end quick-quiz group:', err);
+  }
+}
 
 // Store active quiz timers
 const activeQuizTimers = new Map();
@@ -257,6 +274,7 @@ function setupQuizSocketHandlers(io, socket) {
 
       session.status = 'completed';
       await session.save();
+      await endQuickQuizGroupIfDone(session);
 
       const avatarByUserId = await buildAvatarLookup(session); // Milestone 8 (Leaderboard avatar display)
       const leaderboard = getLeaderboard(session, avatarByUserId);
@@ -965,6 +983,7 @@ async function handleQuestionComplete(io, session, questionIndex) {
             // Mark session completed
             updatedSession.status = 'completed';
             await updatedSession.save();
+            await endQuickQuizGroupIfDone(updatedSession);
 
             const finalLeaderboard = getLeaderboard(updatedSession, avatarByUserId);
             const finalTeamLeaderboard = getTeamLeaderboard(updatedSession, updatedSession.quiz, avatarByUserId); // ✅ NEW (Phase 3)

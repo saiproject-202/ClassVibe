@@ -2,7 +2,7 @@
 // ✅ COLOR SCHEME UPDATE — matches new indigo/slate design language
 //
 // Changes: WhatsApp green (#25D366, #075E54, #D7F0DD)
-//       → indigo/slate  (#6366f1, #1e293b, #eef2ff)
+//       → indigo/slate  (var(--cv-accent-mid), #1e293b, #eef2ff)
 // All logic — fetch, ranking, myRank, badges — 100% UNCHANGED
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -78,7 +78,7 @@ const Leaderboard = ({ sessionId, myScore, onClose }) => {
               style={{
                 ...S.rankItem,
                 backgroundColor: index < 3 ? '#f8faff' : '#ffffff',
-                border:          index < 3 ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                border:          index < 3 ? '2px solid var(--cv-accent-mid)' : '1px solid #e2e8f0',
               }}
             >
               <div style={S.rankLeft}>
@@ -181,13 +181,13 @@ const S = {
     flexShrink: 0,
   },
   myRankBadge:  { fontSize: 44 },
-  myRankLabel:  { fontSize: 11, color: '#6366f1', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' },
+  myRankLabel:  { fontSize: 11, color: 'var(--cv-accent-mid)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' },
   myRankNumber: { fontSize: 30, fontWeight: '800', color: '#1e293b', lineHeight: 1.2 },
   myScore: {
     marginLeft: 'auto',
     fontSize: 22,
     fontWeight: '800',
-    color: '#6366f1',
+    color: 'var(--cv-accent-mid)',
   },
 
   // Rankings list
@@ -213,7 +213,7 @@ const S = {
   badge:       { fontSize: 30 },
   playerName:  { fontSize: 15, fontWeight: '600', color: '#1e293b', marginBottom: 3 },
   playerStats: { fontSize: 12, color: '#64748b' },
-  playerScore: { fontSize: 18, fontWeight: '800', color: '#6366f1' },
+  playerScore: { fontSize: 18, fontWeight: '800', color: 'var(--cv-accent-mid)' },
 
   // Continue button — indigo
   continueBtn: {
@@ -221,7 +221,7 @@ const S = {
     padding: '14px',
     fontSize: 15,
     fontWeight: '700',
-    backgroundColor: '#6366f1',
+    backgroundColor: 'var(--cv-accent-mid)',
     color: '#ffffff',
     border: 'none',
     borderRadius: 10,

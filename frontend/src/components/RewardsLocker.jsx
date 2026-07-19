@@ -84,7 +84,7 @@ const RewardsLocker = ({ onClose }) => {
 
   if (currentUnlock) {
     const rarity = RARITY_COLOR[currentUnlock.rarity] || RARITY_COLOR.common;
-    const iconColor = currentUnlock.colors?.[0]?.hex || '#4F46E5';
+    const iconColor = currentUnlock.colors?.[0]?.hex || 'var(--cv-accent)';
     const isLast = celebrationIndex === newUnlocks.length - 1;
     return (
       <div style={styles.overlay}>

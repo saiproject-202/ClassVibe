@@ -658,11 +658,11 @@ const styles = {
   // ✅ NEW: per-question leaderboard flash (teacher view)
   leaderboardFlash: {
     position: 'absolute', top: '90px', right: '25px', width: '260px', zIndex: 10,
-    backgroundColor: 'white', borderRadius: '12px', border: '2px solid #4F46E5',
+    backgroundColor: 'white', borderRadius: '12px', border: '2px solid var(--cv-accent)',
     boxShadow: '0 8px 24px rgba(0,0,0,0.18)', overflow: 'hidden'
   },
   leaderboardFlashHeader: {
-    padding: '10px 16px', backgroundColor: '#4F46E5', color: 'white',
+    padding: '10px 16px', backgroundColor: 'var(--cv-accent)', color: 'white',
     fontSize: '14px', fontWeight: '700'
   },
   leaderboardFlashList: { padding: '8px', display: 'flex', flexDirection: 'column', gap: '4px' },
@@ -670,7 +670,7 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px',
     borderRadius: '8px', backgroundColor: '#F9FAFB', fontSize: '13px'
   },
-  leaderboardFlashRank: { fontWeight: '700', color: '#4F46E5', minWidth: '22px' },
+  leaderboardFlashRank: { fontWeight: '700', color: 'var(--cv-accent)', minWidth: '22px' },
   leaderboardFlashName: { flex: 1, fontWeight: '600', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   leaderboardFlashScore: { fontWeight: '700', color: '#10B981' },
   leaderboardFlashEmpty: { padding: '12px', fontSize: '13px', color: '#9CA3AF', textAlign: 'center' },
@@ -682,7 +682,7 @@ const styles = {
   momentumLabel: { fontSize: '9px', fontWeight: '700', color: 'white', whiteSpace: 'nowrap' },
   header: {
     display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-    padding: '25px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: '#4F46E5'
+    padding: '25px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: 'var(--cv-accent)'
   },
   title: { fontSize: '24px', fontWeight: '700', color: 'white', margin: 0 },
   subtitle: { fontSize: '14px', color: '#E0E7FF', margin: '5px 0 0 0' },
@@ -690,7 +690,7 @@ const styles = {
   content: { flex: 1, overflowY: 'auto', padding: '30px' },
   infoCard: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '20px', marginBottom: '30px' },
   infoItem: { textAlign: 'center', padding: '25px', backgroundColor: '#F9FAFB', borderRadius: '12px', border: '2px solid #E5E7EB' },
-  infoNumber: { fontSize: '36px', fontWeight: '700', color: '#4F46E5', marginBottom: '8px' },
+  infoNumber: { fontSize: '36px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '8px' },
   infoLabel: { fontSize: '14px', fontWeight: '600', color: '#6B7280' },
   section: { marginBottom: '30px' },
   sectionTitle: { fontSize: '18px', fontWeight: '700', color: '#1F2937', marginBottom: '15px' },
@@ -700,11 +700,11 @@ const styles = {
   emptySubtext: { fontSize: '14px', color: '#6B7280', margin: 0 },
   studentGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '12px' },
   studentChip: { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: '#F9FAFB', borderRadius: '10px', border: '2px solid #E5E7EB' },
-  studentAvatar: { width: '38px', height: '38px', borderRadius: '50%', backgroundColor: '#4F46E5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '700' },
+  studentAvatar: { width: '38px', height: '38px', borderRadius: '50%', backgroundColor: 'var(--cv-accent)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', fontWeight: '700' },
   studentName: { fontSize: '14px', fontWeight: '600', color: '#374151' },
   questionsList: { display: 'flex', flexDirection: 'column', gap: '12px', maxHeight: '300px', overflowY: 'auto' },
   questionPreview: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', backgroundColor: '#F9FAFB', borderRadius: '10px', border: '1px solid #E5E7EB' },
-  questionPreviewNumber: { padding: '8px 14px', backgroundColor: '#4F46E5', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: '700', flexShrink: 0 },
+  questionPreviewNumber: { padding: '8px 14px', backgroundColor: 'var(--cv-accent)', color: 'white', borderRadius: '8px', fontSize: '13px', fontWeight: '700', flexShrink: 0 },
   questionPreviewText: { flex: 1, fontSize: '14px', color: '#374151', fontWeight: '500' },
   questionPreviewMeta: { display: 'flex', gap: '10px', flexShrink: 0 },
   questionPreviewTime: { fontSize: '12px', color: '#6B7280', fontWeight: '600' },
@@ -714,7 +714,7 @@ const styles = {
   startBtn: { padding: '14px 32px', fontSize: '15px', fontWeight: '700', backgroundColor: '#10B981', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.3)' },
 
   // Active header
-  headerActive: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: '#4F46E5' },
+  headerActive: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px 30px', borderBottom: '2px solid #f0f0f0', backgroundColor: 'var(--cv-accent)' },
   titleActive: { fontSize: '22px', fontWeight: '700', color: 'white', margin: '0 0 10px 0' },
   progressBar: { width: '300px', height: '8px', backgroundColor: 'rgba(255,255,255,0.3)', borderRadius: '10px', overflow: 'hidden', marginBottom: '5px' },
   progressFill: { height: '100%', backgroundColor: '#10B981', transition: 'width 0.3s ease' },
@@ -735,16 +735,16 @@ const styles = {
   leftPanel: { display: 'flex', flexDirection: 'column' },
   currentQuestionCard: { backgroundColor: '#F9FAFB', padding: '25px', borderRadius: '12px', border: '2px solid #E5E7EB' },
   currentQuestionHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' },
-  currentQuestionBadge: { padding: '8px 16px', backgroundColor: '#4F46E5', color: 'white', borderRadius: '20px', fontSize: '14px', fontWeight: '700' },
+  currentQuestionBadge: { padding: '8px 16px', backgroundColor: 'var(--cv-accent)', color: 'white', borderRadius: '20px', fontSize: '14px', fontWeight: '700' },
   currentQuestionPoints: { fontSize: '14px', fontWeight: '700', color: '#10B981' },
   currentQuestionText: { fontSize: '22px', fontWeight: '600', color: '#1F2937', lineHeight: '1.4', marginBottom: '20px' },
   currentOptions: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' },
   currentOption: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', borderRadius: '10px' },
-  currentOptionLetter: { width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#4F46E5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '700', flexShrink: 0 },
+  currentOptionLetter: { width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--cv-accent)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '700', flexShrink: 0 },
   currentOptionText: { flex: 1, fontSize: '16px', color: '#374151', fontWeight: '500' },
   correctIndicator: { padding: '5px 12px', backgroundColor: '#10B981', color: 'white', borderRadius: '15px', fontSize: '12px', fontWeight: '700' },
   explanationCard: { padding: '18px', backgroundColor: 'white', borderRadius: '10px', border: '1px solid #E5E7EB' },
-  explanationTitle: { fontSize: '14px', fontWeight: '700', color: '#4F46E5', marginBottom: '8px' },
+  explanationTitle: { fontSize: '14px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '8px' },
   explanationText: { fontSize: '15px', color: '#374151', lineHeight: '1.5', margin: 0 },
 
   // Right panel
@@ -753,7 +753,7 @@ const styles = {
   progressTitle: { fontSize: '18px', fontWeight: '700', color: '#1F2937', marginBottom: '20px' },
   statsRow: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '20px' },
   statBox: { textAlign: 'center', padding: '15px', backgroundColor: 'white', borderRadius: '10px', border: '1px solid #E5E7EB' },
-  statNumber: { fontSize: '24px', fontWeight: '700', color: '#4F46E5', marginBottom: '5px' },
+  statNumber: { fontSize: '24px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '5px' },
   statLabel: { fontSize: '11px', color: '#6B7280', fontWeight: '600' },
   answerProgress: { width: '100%', height: '12px', backgroundColor: 'white', borderRadius: '10px', overflow: 'hidden', marginBottom: '8px' },
   answerProgressFill: { height: '100%', backgroundColor: '#10B981', transition: 'width 0.3s ease' },
@@ -768,7 +768,7 @@ const styles = {
   // ✅ CHANGED: was 'space-between' to spread Minimize + the action button apart;
   // now only one button remains, so it's right-aligned like a normal footer CTA
   footerActive: { display: 'flex', justifyContent: 'flex-end', padding: '20px 30px', borderTop: '2px solid #f0f0f0' },
-  nextBtn: { padding: '12px 28px', fontSize: '14px', fontWeight: '700', backgroundColor: '#4F46E5', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)' },
+  nextBtn: { padding: '12px 28px', fontSize: '14px', fontWeight: '700', backgroundColor: 'var(--cv-accent)', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(79, 70, 229, 0.3)' },
   // ✅ NEW: End Quiz on last question — red, same as header endBtn
   endQuizLastBtn: { padding: '12px 28px', fontSize: '14px', fontWeight: '700', backgroundColor: '#EF4444', color: 'white', border: 'none', borderRadius: '10px', cursor: 'pointer', boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)' },
 
@@ -786,7 +786,7 @@ const styles = {
     display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 16px',
     backgroundColor: '#F9FAFB', borderRadius: '10px', border: '1px solid #E5E7EB'
   },
-  finalLeaderboardRank: { fontWeight: '700', color: '#4F46E5', minWidth: '30px' },
+  finalLeaderboardRank: { fontWeight: '700', color: 'var(--cv-accent)', minWidth: '30px' },
   finalLeaderboardName: { flex: 1, fontWeight: '600', color: '#374151', textAlign: 'left' },
   finalLeaderboardScore: { fontWeight: '700', color: '#10B981' },
   finalLeaderboardMeta: { fontSize: '12px', color: '#6B7280', minWidth: '90px', textAlign: 'right' },

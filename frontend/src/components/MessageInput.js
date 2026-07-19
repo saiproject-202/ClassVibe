@@ -17,14 +17,16 @@ const MessageInput = ({
   onSendMessage,
   onTyping,
   onStopTyping,
-  disabled  = false,
-  isAdmin   = false,
-  members   = []
+  disabled       = false,
+  isAdmin        = false,
+  members        = [],
+  moderatedChat  = false,
+  adminId        = null
 }) => {
-  const [message,          setMessage]          = useState('');
-  const [showFileMenu,     setShowFileMenu]     = useState(false);
-  const [showRecipients,   setShowRecipients]   = useState(false);
-  const [selectedRecipient,setSelectedRecipient]= useState(null);
+  const [message,           setMessage]           = useState('');
+  const [showFileMenu,      setShowFileMenu]      = useState(false);
+  const [showRecipients,    setShowRecipients]    = useState(false);
+  const [selectedRecipients,setSelectedRecipients]= useState([]);
   const [uploading,        setUploading]        = useState(false);
   const [uploadProgress,   setUploadProgress]   = useState(0);
   const [showPollCreator,  setShowPollCreator]  = useState(false);
@@ -48,18 +50,18 @@ const MessageInput = ({
     }
   };
 
-  // ── Send message — UNCHANGED ─────────────────────────────────────────────
+  // ── Send message ──────────────────────────────────────────────────────────
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!message.trim()) return;
     const messageData = {
       content: message.trim(),
-      messageType: selectedRecipient ? 'private' : 'text',
-      recipientId: selectedRecipient ? selectedRecipient._id : null
+      messageType: selectedRecipients.length ? 'private' : 'text',
+      recipientIds: selectedRecipients.map(r => r._id)
     };
     if (onSendMessage) onSendMessage(messageData);
     setMessage('');
-    setSelectedRecipient(null);
+    setSelectedRecipients([]);
     if (onStopTyping) onStopTyping();
     inputRef.current?.focus();
   };
@@ -92,10 +94,10 @@ const MessageInput = ({
           fileName:  response.file.name,
           fileSize:  response.file.size,
           fileType:  response.file.type,
-          recipientId: selectedRecipient ? selectedRecipient._id : null
+          recipientIds: selectedRecipients.map(r => r._id)
         };
         if (onSendMessage) onSendMessage(fileMessage);
-        setSelectedRecipient(null);
+        setSelectedRecipients([]);
       }
     } catch (err) {
       console.error('Upload failed:', err);
@@ -148,22 +150,27 @@ const MessageInput = ({
       content: pollQuestion.trim(),
       messageType: 'poll',
       pollOptions: valid,
-      recipientId: selectedRecipient ? selectedRecipient._id : null
+      recipientIds: selectedRecipients.map(r => r._id)
     };
     if (onSendMessage) onSendMessage(pollMessage);
     setPollQuestion('');
     setPollOptions(['', '']);
     setShowPollCreator(false);
-    setSelectedRecipient(null);
+    setSelectedRecipients([]);
   };
   const cancelPoll = () => { setPollQuestion(''); setPollOptions(['', '']); setShowPollCreator(false); };
 
-  // ── Recipient — UNCHANGED ─────────────────────────────────────────────────
-  const handleRecipientSelect = (member) => {
-    setSelectedRecipient(selectedRecipient?._id === member._id ? null : member);
-    setShowRecipients(false);
+  // ── Recipient (multi-select — Teacher Moderated Chat) ─────────────────────
+  const toggleRecipient = (member) => {
+    setSelectedRecipients(prev =>
+      prev.some(r => r._id === member._id)
+        ? prev.filter(r => r._id !== member._id)
+        : [...prev, member]
+    );
     inputRef.current?.focus();
   };
+  const recipientMembers = members.filter(m => m._id !== adminId);
+  const showRecipientPicker = isAdmin && moderatedChat;
 
   useEffect(() => {
     return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); };
@@ -172,9 +179,11 @@ const MessageInput = ({
   // ── Placeholder text ──────────────────────────────────────────────────────
   const placeholder = uploading
     ? 'Uploading...'
-    : selectedRecipient
-      ? `Private message to ${selectedRecipient.username}...`
-      : 'Type a message to the class...';
+    : selectedRecipients.length === 1
+      ? `Private message to ${selectedRecipients[0].username || selectedRecipients[0].name}...`
+      : selectedRecipients.length > 1
+        ? `Private message to ${selectedRecipients.length} students...`
+        : 'Type a message to the class...';
 
   // ════════════════════════════════════════════════════════════════════════
   //  RENDER
@@ -197,12 +206,12 @@ const MessageInput = ({
       )}
 
       {/* ── Private message banner ── */}
-      {selectedRecipient && (
+      {selectedRecipients.length > 0 && (
         <div style={{ ...S.recipientBanner, backgroundColor: document.body.classList.contains('dark-mode')?'#1e3a5f':'#eef2ff', borderColor: document.body.classList.contains('dark-mode')?'#3730a3':'#c7d2fe' }}>
           <span style={{ ...S.recipientText, color: document.body.classList.contains('dark-mode')?'#a5b4fc':'#4f46e5' }}>
-            Private message to: <strong>{selectedRecipient.username || selectedRecipient.name || 'User'}</strong>
+            Private message to: <strong>{selectedRecipients.map(r => r.username || r.name || 'User').join(', ')}</strong>
           </span>
-          <button onClick={() => setSelectedRecipient(null)} style={S.clearRecipient}>✕</button>
+          <button onClick={() => setSelectedRecipients([])} style={S.clearRecipient}>✕</button>
         </div>
       )}
 
@@ -270,28 +279,36 @@ const MessageInput = ({
         </div>
       )}
 
-      {/* ── Recipient dropdown — anchored to left (👥) button ── */}
-      {showRecipients && isAdmin && (
+      {/* ── Recipient dropdown (multi-select) — anchored to left (👥) button ── */}
+      {showRecipients && showRecipientPicker && (
         <div style={S.recipientDropdown}>
-          <div style={S.recipientHeader}>Send to:</div>
+          <div style={S.recipientHeader}>Reply to:</div>
           <button
-            onClick={() => { setSelectedRecipient(null); setShowRecipients(false); }}
-            style={{ ...S.recipientOption, backgroundColor: !selectedRecipient ? '#eef2ff' : 'transparent' }}
+            onClick={() => { setSelectedRecipients([]); setShowRecipients(false); }}
+            style={{ ...S.recipientOption, backgroundColor: selectedRecipients.length === 0 ? '#eef2ff' : 'transparent' }}
           >
             📢 Everyone
           </button>
-          {members.map(member => (
-            <button
-              key={member._id}
-              onClick={() => handleRecipientSelect(member)}
-              style={{
-                ...S.recipientOption,
-                backgroundColor: selectedRecipient?._id === member._id ? '#eef2ff' : 'transparent'
-              }}
-            >
-              👤 {member.username}
+          {recipientMembers.map(member => {
+            const checked = selectedRecipients.some(r => r._id === member._id);
+            return (
+              <button
+                key={member._id}
+                onClick={() => toggleRecipient(member)}
+                style={{
+                  ...S.recipientOption,
+                  backgroundColor: checked ? '#eef2ff' : 'transparent'
+                }}
+              >
+                {checked ? '✅' : '👤'} {member.username || member.name}
+              </button>
+            );
+          })}
+          {selectedRecipients.length > 0 && (
+            <button onClick={() => setShowRecipients(false)} style={S.recipientDone}>
+              Done ({selectedRecipients.length} selected)
             </button>
-          ))}
+          )}
         </div>
       )}
 
@@ -301,14 +318,14 @@ const MessageInput = ({
           ════════════════════════════════════════ */}
       <form onSubmit={handleSendMessage} style={S.inputCard}>
 
-        {/* Left: people icon — admin gets recipient picker, others get decorative */}
-        {isAdmin ? (
+        {/* Left: people icon — teacher gets recipient picker only in Moderated Chat mode */}
+        {showRecipientPicker ? (
           <button
             type="button"
             onClick={() => setShowRecipients(!showRecipients)}
             style={S.leftIconBtn}
             disabled={disabled || uploading}
-            title="Select recipient"
+            title="Select recipient(s)"
           >
             👥
           </button>
@@ -374,7 +391,7 @@ const S = {
   // ── Upload progress ──
   uploadWrap:    { marginBottom: 10 },
   progressBar:   { width: '100%', height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, overflow: 'hidden', marginBottom: 5 },
-  progressFill:  { height: '100%', backgroundColor: '#6366f1', transition: 'width 0.3s' },
+  progressFill:  { height: '100%', backgroundColor: 'var(--cv-accent-mid)', transition: 'width 0.3s' },
   progressText:  { fontSize: 12, color: '#64748b' },
 
   // ── Private recipient banner ──
@@ -437,6 +454,7 @@ const S = {
   },
   recipientHeader: { padding: '10px 14px', fontSize: 12, fontWeight: '700', color: '#64748b', borderBottom: '1px solid #e2e8f0', textTransform: 'uppercase', letterSpacing: '0.4px' },
   recipientOption: { width: '100%', padding: '10px 14px', fontSize: 14, textAlign: 'left', border: 'none', cursor: 'pointer', color: '#374151', transition: 'background 0.15s' },
+  recipientDone: { width: '100%', padding: '10px 14px', fontSize: 13, fontWeight: '700', textAlign: 'center', border: 'none', borderTop: '1px solid #e2e8f0', cursor: 'pointer', color: 'var(--cv-accent-mid)', backgroundColor: '#f8fafc' },
 
   // ════════════════════════════════════════
   //  INPUT CARD
@@ -567,10 +585,10 @@ const S = {
   pollOptionRow:   { display: 'flex', gap: 8, marginBottom: 10 },
   pollOptionInput: { flex: 1, padding: '10px 12px', fontSize: 14, border: '1.5px solid #e2e8f0', borderRadius: 8, outline: 'none', color: '#1e293b' },
   removeOptionBtn: { width: 36, height: 36, backgroundColor: '#fee2e2', color: '#ef4444', border: 'none', borderRadius: 8, cursor: 'pointer', fontSize: 15, fontWeight: '700' },
-  addOptionBtn:    { padding: '9px 14px', fontSize: 13, fontWeight: '600', color: '#6366f1', backgroundColor: 'transparent', border: '1.5px dashed #c7d2fe', borderRadius: 8, cursor: 'pointer', marginTop: 8 },
+  addOptionBtn:    { padding: '9px 14px', fontSize: 13, fontWeight: '600', color: 'var(--cv-accent-mid)', backgroundColor: 'transparent', border: '1.5px dashed #c7d2fe', borderRadius: 8, cursor: 'pointer', marginTop: 8 },
   pollFooterRow:   { display: 'flex', gap: 10, padding: '16px 20px', borderTop: '1px solid #e2e8f0' },
   pollCancelBtn:   { flex: 1, padding: 12, fontSize: 14, fontWeight: '600', backgroundColor: '#f1f5f9', color: '#475569', border: 'none', borderRadius: 8, cursor: 'pointer' },
-  pollCreateBtn:   { flex: 1, padding: 12, fontSize: 14, fontWeight: '700', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
+  pollCreateBtn:   { flex: 1, padding: 12, fontSize: 14, fontWeight: '700', backgroundColor: 'var(--cv-accent-mid)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
 };
 
 if (typeof document !== 'undefined') {

@@ -17,7 +17,7 @@ const Footer = () => (
       <a
         href="/privacy-policy"
         style={S.link}
-        onMouseEnter={e => e.currentTarget.style.color = '#6366f1'}
+        onMouseEnter={e => e.currentTarget.style.color = 'var(--cv-accent-mid)'}
         onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
       >
         Privacy Policy
@@ -26,7 +26,7 @@ const Footer = () => (
       <a
         href="/terms-of-service"
         style={S.link}
-        onMouseEnter={e => e.currentTarget.style.color = '#6366f1'}
+        onMouseEnter={e => e.currentTarget.style.color = 'var(--cv-accent-mid)'}
         onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
       >
         Terms of Service

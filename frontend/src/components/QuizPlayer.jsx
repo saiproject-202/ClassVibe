@@ -503,7 +503,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
           style={{
             ...styles.momentumSegment,
             width: `${team.percentage}%`,
-            backgroundColor: team.color || '#4F46E5',
+            backgroundColor: team.color || 'var(--cv-accent)',
             outline: team.teamId === myTeamId ? '2px solid #fff' : 'none',
             outlineOffset: team.teamId === myTeamId ? '-2px' : '0'
           }}
@@ -534,7 +534,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
             key={team.teamId}
             style={{
               ...styles.teamLbCard,
-              borderColor: team.teamId === myTeamId ? (team.color || '#4F46E5') : '#e0e0e0'
+              borderColor: team.teamId === myTeamId ? (team.color || 'var(--cv-accent)') : '#e0e0e0'
             }}
           >
             <div
@@ -606,7 +606,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
                 ? '3px solid #ccc'
                 : fillFocused
                   ? '3px solid #25D366'
-                  : '3px solid #4F46E5',
+                  : '3px solid var(--cv-accent)',
               boxShadow: fillFocused && !hasAnswered
                 ? '0 0 0 4px rgba(37,211,102,0.18)'
                 : 'none',
@@ -841,7 +841,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
             // ✅ Spectator: neutral "answer reveal" banner (no personal correct/incorrect,
             // no points) — the teacher is watching, not answering. The correct answer is
             // highlighted in the review box below, same as students see.
-            <div style={{ ...styles.resultBadge, backgroundColor: '#EEF2FF', borderColor: '#4F46E5' }}>
+            <div style={{ ...styles.resultBadge, backgroundColor: 'var(--cv-accent-light)', borderColor: 'var(--cv-accent)' }}>
               <div style={styles.resultIcon}>💡</div>
               <div style={styles.resultText}>
                 <h2 style={{ ...styles.resultTitle, color: '#3730A3' }}>Answer Reveal</h2>
@@ -982,7 +982,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
                 <div key={team.teamId} style={styles.teamCompareRow}>
                   <span style={styles.teamCompareName}>{team.icon} {team.name}</span>
                   <div style={styles.teamCompareBarTrack}>
-                    <div style={{ ...styles.teamCompareBarFill, width: `${team.correctPercent}%`, backgroundColor: team.color || '#4F46E5' }} />
+                    <div style={{ ...styles.teamCompareBarFill, width: `${team.correctPercent}%`, backgroundColor: team.color || 'var(--cv-accent)' }} />
                   </div>
                   <span style={styles.teamCompareValue}>{team.correctCount}/{team.totalCount}</span>
                 </div>
@@ -1004,7 +1004,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
   // wait (see leaderboard:show handler above).
   if (currentView === 'countdown') {
     const myTeam = teamsList.find(t => t.teamId === myTeamId);
-    const glowColor = myTeam?.color || '#4F46E5';
+    const glowColor = myTeam?.color || 'var(--cv-accent)';
     return (
       <div style={{ ...styles.overlay, backgroundColor: undefined, background: `radial-gradient(circle at center, ${glowColor}33 0%, rgba(0,0,0,0.95) 70%)` }}>
         <div style={styles.countdownBox}>
@@ -1130,7 +1130,7 @@ const QuizPlayer = ({ sessionId, onClose, spectator = false, onFinish }) => {
           {isTeamMode && (
             <div style={styles.teamColumnsRow}>
               {teamLeaderboard.map((team) => (
-                <div key={team.teamId} style={{ ...styles.teamColumn, borderColor: team.color || '#4F46E5' }}>
+                <div key={team.teamId} style={{ ...styles.teamColumn, borderColor: team.color || 'var(--cv-accent)' }}>
                   <div style={styles.teamColumnHeader}>
                     <span>#{team.rank}</span> {team.icon} {team.name}
                   </div>
@@ -1325,12 +1325,12 @@ const styles = {
   waitingIcon: { fontSize: '80px', marginBottom: '20px', animation: 'bounce 2s infinite' },
   waitingTitle: { fontSize: '28px', fontWeight: '700', color: '#1a1a1a', marginBottom: '15px' },
   waitingText: { fontSize: '16px', color: '#666', marginBottom: '30px' },
-  waitingPulse: { width: '60px', height: '60px', borderRadius: '50%', backgroundColor: '#4F46E5', margin: '0 auto', animation: 'pulse 2s infinite' },
+  waitingPulse: { width: '60px', height: '60px', borderRadius: '50%', backgroundColor: 'var(--cv-accent)', margin: '0 auto', animation: 'pulse 2s infinite' },
   closeWaitingBtn: { padding: '12px 32px', fontSize: '15px', fontWeight: '600', backgroundColor: '#f0f0f0', color: '#333', border: 'none', borderRadius: '10px', cursor: 'pointer', marginTop: '20px' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '25px', paddingBottom: '20px', borderBottom: '2px solid #f0f0f0' },
   headerLeft: { display: 'flex', flexDirection: 'column', gap: '8px' },
   headerRight: { display: 'flex', alignItems: 'center', gap: '12px' },
-  progressText: { fontSize: '15px', fontWeight: '600', color: '#4F46E5' },
+  progressText: { fontSize: '15px', fontWeight: '600', color: 'var(--cv-accent)' },
   questionTypeBadge: { fontSize: '12px', fontWeight: '600', color: '#666', backgroundColor: '#f0f0f0', padding: '4px 10px', borderRadius: '12px', display: 'inline-block' },
   streakDisplay: { padding: '8px 16px', borderRadius: '20px', fontSize: '16px', fontWeight: '700', backgroundColor: '#FFA500', color: 'white', display: 'flex', alignItems: 'center', gap: '6px', transition: 'transform 0.2s ease' },
   timer: { padding: '10px 20px', borderRadius: '25px', fontSize: '20px', fontWeight: '700', color: 'white', minWidth: '100px', textAlign: 'center' },
@@ -1338,30 +1338,30 @@ const styles = {
   questionText: { fontSize: '24px', fontWeight: '600', color: '#1a1a1a', lineHeight: '1.4', marginBottom: '12px' },
   questionPoints: { fontSize: '14px', fontWeight: '600', color: '#25D366' },
   fillInBlankContainer: { marginBottom: '25px' },
-  fillInBlankLabel: { display: 'block', fontSize: '13px', fontWeight: '700', color: '#4F46E5', marginBottom: '10px', letterSpacing: '0.5px', textTransform: 'uppercase' },
+  fillInBlankLabel: { display: 'block', fontSize: '13px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '10px', letterSpacing: '0.5px', textTransform: 'uppercase' },
   fillInBlankInput: { display: 'block', width: '100%', padding: '16px 20px', fontSize: '18px', borderRadius: '12px', outline: 'none', fontFamily: 'inherit', boxSizing: 'border-box', backgroundColor: '#fff', color: '#1a1a1a', lineHeight: '1.4', WebkitAppearance: 'none' },
   fillInBlankFooter: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '10px', minHeight: '22px' },
   fillInBlankHint: { fontSize: '13px', color: '#888' },
   fillInBlankSaved: { fontSize: '13px', fontWeight: '600', color: '#25D366' },
   kbd: { display: 'inline-block', padding: '2px 7px', fontSize: '11px', fontFamily: 'inherit', fontWeight: '700', color: '#444', backgroundColor: '#f0f0f0', border: '1px solid #bbb', borderRadius: '4px', boxShadow: '0 1px 2px rgba(0,0,0,0.15)' },
   characterCount: { marginTop: '8px', fontSize: '12px', color: '#666', textAlign: 'right' },
-  multiSelectHint: { fontSize: '14px', fontWeight: '600', color: '#4F46E5', marginBottom: '12px', padding: '10px', backgroundColor: '#E3F2FD', borderRadius: '8px', textAlign: 'center' },
+  multiSelectHint: { fontSize: '14px', fontWeight: '600', color: 'var(--cv-accent)', marginBottom: '12px', padding: '10px', backgroundColor: '#E3F2FD', borderRadius: '8px', textAlign: 'center' },
   checkbox: { width: '28px', height: '28px', borderRadius: '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, transition: 'all 0.2s' },
   checkmark: { color: 'white', fontSize: '18px', fontWeight: '700' },
   optionsGrid: { display: 'flex', flexDirection: 'column', gap: '15px', marginBottom: '25px' },
   option: { display: 'flex', alignItems: 'center', gap: '15px', padding: '18px', borderRadius: '12px', transition: 'all 0.2s', position: 'relative', background: 'none' },
-  optionLetter: { width: '45px', height: '45px', borderRadius: '50%', backgroundColor: '#4F46E5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: '700', flexShrink: 0 },
+  optionLetter: { width: '45px', height: '45px', borderRadius: '50%', backgroundColor: 'var(--cv-accent)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '20px', fontWeight: '700', flexShrink: 0 },
   optionText: { flex: 1, fontSize: '17px', color: '#333', fontWeight: '500', textAlign: 'left' },
   selectedBadge: { width: '30px', height: '30px', borderRadius: '50%', backgroundColor: '#4CAF50', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '700' },
   submitBtn: { width: '100%', padding: '18px', fontSize: '18px', fontWeight: '700', backgroundColor: '#25D366', color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s', boxShadow: '0 4px 12px rgba(37, 211, 102, 0.3)' },
   // ✅ NEW (teacher spectator view)
-  spectatorNote: { textAlign: 'center', marginTop: '16px', padding: '10px', backgroundColor: '#EEF2FF', color: '#4338CA', borderRadius: '10px', fontSize: '14px', fontWeight: '600' },
+  spectatorNote: { textAlign: 'center', marginTop: '16px', padding: '10px', backgroundColor: 'var(--cv-accent-light)', color: 'var(--cv-accent-hover)', borderRadius: '10px', fontSize: '14px', fontWeight: '600' },
   spectatorFib: { textAlign: 'center', padding: '24px', color: '#6B7280', fontSize: '15px', fontStyle: 'italic', backgroundColor: '#F9FAFB', borderRadius: '10px' },
   spectatorBar: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', marginTop: '16px', paddingTop: '14px', borderTop: '1px solid #E5E7EB' },
   spectatorBarLabel: { fontSize: '13px', fontWeight: '700', color: '#6366F1' },
   spectatorFinishBtn: { padding: '10px 18px', fontSize: '14px', fontWeight: '700', backgroundColor: '#EF4444', color: 'white', border: 'none', borderRadius: '8px', cursor: 'pointer' },
   waitingMessage: { textAlign: 'center', padding: '20px', fontSize: '16px', color: '#666', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
-  waitingSpinner: { width: '20px', height: '20px', border: '3px solid #f0f0f0', borderTop: '3px solid #4F46E5', borderRadius: '50%', animation: 'spin 1s linear infinite' },
+  waitingSpinner: { width: '20px', height: '20px', border: '3px solid #f0f0f0', borderTop: '3px solid var(--cv-accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' },
   scoreDisplay: { textAlign: 'center', marginTop: '20px', padding: '15px', backgroundColor: '#F3F4F6', borderRadius: '10px', fontSize: '16px', fontWeight: '600', color: '#1a1a1a', display: 'flex', justifyContent: 'space-around', alignItems: 'center' },
   streakText: { fontSize: '16px', fontWeight: '700', color: '#FFA500' },
   resultBadge: { display: 'flex', alignItems: 'center', gap: '20px', padding: '25px', borderRadius: '16px', marginBottom: '25px', border: '3px solid' },
@@ -1373,33 +1373,33 @@ const styles = {
   streakBadge: { fontSize: '16px', fontWeight: '700', color: '#FFA500', marginTop: '8px', display: 'inline-block', transition: 'transform 0.2s ease' },
   streakBump: { transform: 'scale(1.25)' },
   // ✅ NEW: team contribution + rank movement (Correct Answer screen)
-  teamContribText: { fontSize: '14px', fontWeight: '600', color: '#4F46E5', margin: '8px 0 0' },
+  teamContribText: { fontSize: '14px', fontWeight: '600', color: 'var(--cv-accent)', margin: '8px 0 0' },
   rankMoveText: { fontSize: '14px', fontWeight: '700', margin: '4px 0 0' },
   nextBeatCue: { fontSize: '13px', color: '#9CA3AF', margin: '10px 0 0', fontStyle: 'italic' },
   reviewBox: { backgroundColor: '#f9f9f9', padding: '25px', borderRadius: '12px', marginBottom: '20px' },
-  reviewTitle: { fontSize: '16px', fontWeight: '700', color: '#4F46E5', marginBottom: '10px' },
+  reviewTitle: { fontSize: '16px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '10px' },
   reviewQuestion: { fontSize: '20px', fontWeight: '600', color: '#1a1a1a', marginBottom: '20px', lineHeight: '1.4' },
   fillInBlankReview: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' },
   reviewLabel: { fontSize: '14px', fontWeight: '600', color: '#666' },
   fillInBlankAnswer: { padding: '15px 20px', borderRadius: '10px', fontSize: '18px', fontWeight: '600', border: '2px solid #e0e0e0' },
   reviewOptions: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' },
   reviewOption: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', borderRadius: '10px', position: 'relative' },
-  reviewOptionLetter: { width: '40px', height: '40px', borderRadius: '50%', backgroundColor: '#4F46E5', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '700', flexShrink: 0 },
+  reviewOptionLetter: { width: '40px', height: '40px', borderRadius: '50%', backgroundColor: 'var(--cv-accent)', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', fontWeight: '700', flexShrink: 0 },
   reviewOptionText: { flex: 1, fontSize: '16px', color: '#333', fontWeight: '500' },
   correctBadge: { padding: '5px 12px', backgroundColor: '#4CAF50', color: 'white', borderRadius: '20px', fontSize: '12px', fontWeight: '700' },
   wrongBadge: { padding: '5px 12px', backgroundColor: '#F44336', color: 'white', borderRadius: '20px', fontSize: '12px', fontWeight: '700' },
   explanationBox: { padding: '18px', backgroundColor: 'white', borderRadius: '10px', border: '1px solid #e0e0e0', marginBottom: '15px' },
-  explanationTitle: { fontSize: '14px', fontWeight: '700', color: '#4F46E5', marginBottom: '8px' },
+  explanationTitle: { fontSize: '14px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '8px' },
   explanationText: { fontSize: '15px', color: '#333', lineHeight: '1.5', margin: 0 },
   scoreUpdate: { textAlign: 'center', fontSize: '18px', fontWeight: '600', color: '#1a1a1a' },
   waitNextMessage: { textAlign: 'center', padding: '20px', fontSize: '15px', color: '#666', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px' },
-  waitSpinner: { width: '16px', height: '16px', border: '2px solid #f0f0f0', borderTop: '2px solid #4F46E5', borderRadius: '50%', animation: 'spin 1s linear infinite' },
+  waitSpinner: { width: '16px', height: '16px', border: '2px solid #f0f0f0', borderTop: '2px solid var(--cv-accent)', borderRadius: '50%', animation: 'spin 1s linear infinite' },
 
   // ✅ NEW: Question Summary view
   summaryHeading: { fontSize: '22px', fontWeight: '700', color: '#1a1a1a', textAlign: 'center', margin: '0 0 20px' },
   summaryStatsGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px', marginBottom: '18px' },
   summaryStatCard: { textAlign: 'center', padding: '20px', backgroundColor: '#F9FAFB', borderRadius: '12px', border: '1px solid #E5E7EB' },
-  summaryStatValue: { fontSize: '32px', fontWeight: '800', color: '#4F46E5' },
+  summaryStatValue: { fontSize: '32px', fontWeight: '800', color: 'var(--cv-accent)' },
   summaryStatLabel: { fontSize: '13px', color: '#6B7280', fontWeight: '600', marginTop: '4px' },
   fastestCard: { padding: '14px 18px', backgroundColor: '#FFF7E6', border: '1px solid #FFD580', borderRadius: '10px', fontSize: '14px', color: '#92400E', marginBottom: '18px' },
   teamCompareSection: { padding: '16px 0' },
@@ -1418,11 +1418,11 @@ const styles = {
   leaderboardTitle: { fontSize: '28px', fontWeight: '700', color: '#1a1a1a', marginBottom: '20px', textAlign: 'center' },
   leaderboardList: { display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' },
   leaderboardItem: { display: 'flex', alignItems: 'center', gap: '15px', padding: '15px', borderRadius: '10px', border: '2px solid #e0e0e0' },
-  rank: { fontSize: '24px', fontWeight: '700', color: '#4F46E5', minWidth: '50px' },
+  rank: { fontSize: '24px', fontWeight: '700', color: 'var(--cv-accent)', minWidth: '50px' },
   playerInfo: { flex: 1 },
   playerNameRow: { display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', marginBottom: '4px' },
   playerName: { fontSize: '16px', fontWeight: '700', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  playerScore: { fontSize: '16px', fontWeight: '700', color: '#4F46E5', flexShrink: 0 },
+  playerScore: { fontSize: '16px', fontWeight: '700', color: 'var(--cv-accent)', flexShrink: 0 },
   playerStats: { fontSize: '13px', color: '#666' },
   finishedTitle: { fontSize: '32px', fontWeight: '700', color: '#1a1a1a', marginBottom: '20px', textAlign: 'center' },
 
@@ -1451,7 +1451,7 @@ const styles = {
   // Milestone 11: compact "everyone beyond the podium" ranks list (individual mode)
   remainingRanksList: { display: 'flex', flexDirection: 'column', gap: '6px', marginBottom: '20px' },
   remainingRankRow: { display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 12px', borderRadius: '8px', border: '1px solid #EEF0F6' },
-  remainingRankNum: { fontSize: '13px', fontWeight: '700', color: '#4F46E5', minWidth: '30px' },
+  remainingRankNum: { fontSize: '13px', fontWeight: '700', color: 'var(--cv-accent)', minWidth: '30px' },
   remainingRankScore: { fontSize: '13px', fontWeight: '700', color: '#1a1a1a' },
   remainingRankMeta: { fontSize: '12px', color: '#6B7280', marginLeft: 'auto' },
 
@@ -1464,7 +1464,7 @@ const styles = {
   teamColumnMembers: { display: 'flex', flexDirection: 'column', gap: '6px' },
   teamColumnMemberRow: { display: 'flex', alignItems: 'center', gap: '6px' },
   teamColumnMemberName: { fontSize: '12px', color: '#374151', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-  teamColumnMemberScore: { fontSize: '12px', fontWeight: '700', color: '#4F46E5' },
+  teamColumnMemberScore: { fontSize: '12px', fontWeight: '700', color: 'var(--cv-accent)' },
 
   // Milestone 11: the top-3-only "Choose your celebration" panel
   celebrationPicker: { backgroundColor: '#F5F3FF', border: '2px solid #DDD6FE', borderRadius: '16px', padding: '18px', marginBottom: '20px' },
@@ -1489,7 +1489,7 @@ const styles = {
   savedNote: { textAlign: 'center', fontSize: '13px', color: '#25D366', fontWeight: '600', marginBottom: '10px' },
   // ✅ NEW (Phase 2): Class Highlights / awards card
   awardsCard: { backgroundColor: '#F5F3FF', border: '2px solid #DDD6FE', borderRadius: '14px', padding: '18px', marginBottom: '20px' },
-  awardsTitle: { fontSize: '15px', fontWeight: '700', color: '#4F46E5', marginBottom: '12px', textAlign: 'center' },
+  awardsTitle: { fontSize: '15px', fontWeight: '700', color: 'var(--cv-accent)', marginBottom: '12px', textAlign: 'center' },
   awardsList: { display: 'flex', flexDirection: 'column', gap: '8px' },
   awardItem: { display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 14px', borderRadius: '10px' },
   awardIcon: { fontSize: '22px', flexShrink: 0 },
@@ -1498,17 +1498,17 @@ const styles = {
   awardWinner: { fontSize: '14px', fontWeight: '600', color: '#1a1a1a', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
   tabs: { display: 'flex', gap: '10px', marginBottom: '20px', borderBottom: '2px solid #e0e0e0', paddingBottom: '10px' },
   tab: { flex: 1, padding: '12px', fontSize: '15px', fontWeight: '600', backgroundColor: '#f0f0f0', color: '#666', border: 'none', borderRadius: '8px 8px 0 0', cursor: 'pointer', transition: 'all 0.2s' },
-  tabActive: { backgroundColor: '#4F46E5', color: 'white' },
+  tabActive: { backgroundColor: 'var(--cv-accent)', color: 'white' },
   tabContent: { marginBottom: '20px' },
   myRankCard: { padding: '20px', backgroundColor: '#FFF9C4', borderRadius: '12px', marginBottom: '20px', textAlign: 'center', border: '2px solid #FDD835' },
   myRankText: { fontSize: '18px', fontWeight: '600', color: '#1a1a1a', marginBottom: '8px' },
-  myScoreText: { fontSize: '24px', fontWeight: '700', color: '#4F46E5' },
+  myScoreText: { fontSize: '24px', fontWeight: '700', color: 'var(--cv-accent)' },
   // ✅ NEW (Phase 3): team leaderboard
   myTeamRankText: { fontSize: '14px', fontWeight: '600', color: '#6B7280', marginTop: '8px' },
   teamLbList: { display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '20px' },
   teamLbCard: { border: '2px solid #e0e0e0', borderRadius: '12px', overflow: 'hidden' },
   teamLbHeader: { display: 'flex', alignItems: 'center', gap: '10px', padding: '12px 16px', backgroundColor: '#F9FAFB' },
-  teamLbRank: { fontSize: '18px', fontWeight: '700', color: '#4F46E5', minWidth: '32px' },
+  teamLbRank: { fontSize: '18px', fontWeight: '700', color: 'var(--cv-accent)', minWidth: '32px' },
   teamLbIcon: { fontSize: '18px' },
   teamLbName: { flex: 1, fontSize: '15px', fontWeight: '700', color: '#1a1a1a' },
   teamLbScore: { fontSize: '15px', fontWeight: '700', color: '#10B981' },
@@ -1525,15 +1525,15 @@ const styles = {
   reviewSummary: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px', marginBottom: '20px' },
   summaryCard: { padding: '15px', backgroundColor: '#f9f9f9', borderRadius: '10px', textAlign: 'center', border: '2px solid #e0e0e0' },
   summaryLabel: { fontSize: '12px', fontWeight: '600', color: '#666', marginBottom: '8px' },
-  summaryValue: { fontSize: '20px', fontWeight: '700', color: '#4F46E5' },
+  summaryValue: { fontSize: '20px', fontWeight: '700', color: 'var(--cv-accent)' },
   answersList: { display: 'flex', flexDirection: 'column', gap: '10px' },
   answerCard: { padding: '15px', backgroundColor: '#fff', borderRadius: '10px', border: '2px solid #e0e0e0' },
   answerHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' },
-  answerNumber: { fontSize: '14px', fontWeight: '700', color: '#4F46E5' },
+  answerNumber: { fontSize: '14px', fontWeight: '700', color: 'var(--cv-accent)' },
   answerResult: { fontSize: '14px', fontWeight: '700' },
   answerPoints: { fontSize: '14px', fontWeight: '700', color: '#666' },
   answerQuestion: { fontSize: '14px', color: '#333', lineHeight: '1.4' },
-  exitBtn: { width: '100%', padding: '18px', fontSize: '18px', fontWeight: '700', backgroundColor: '#4F46E5', color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s' }
+  exitBtn: { width: '100%', padding: '18px', fontSize: '18px', fontWeight: '700', backgroundColor: 'var(--cv-accent)', color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer', transition: 'all 0.2s' }
 };
 
 if (typeof document !== 'undefined') {

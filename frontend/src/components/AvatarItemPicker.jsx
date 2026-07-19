@@ -230,9 +230,9 @@ const styles = {
     cursor: 'pointer'
   },
   filterTabActive: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#EEF2FF',
-    color: '#4F46E5'
+    borderColor: 'var(--cv-accent)',
+    backgroundColor: 'var(--cv-accent-light)',
+    color: 'var(--cv-accent)'
   },
   emptyHint: {
     fontSize: 12,
@@ -263,8 +263,8 @@ const styles = {
     textAlign: 'center'
   },
   cardEquipped: {
-    borderColor: '#4F46E5',
-    boxShadow: '0 0 0 2px #EEF2FF'
+    borderColor: 'var(--cv-accent)',
+    boxShadow: '0 0 0 2px var(--cv-accent-light)'
   },
   cardLocked: {
     opacity: 0.65,
@@ -333,13 +333,13 @@ const styles = {
     marginTop: 4,
     fontSize: 9,
     fontWeight: 700,
-    color: '#4F46E5'
+    color: 'var(--cv-accent)'
   },
   equipRing: {
     position: 'absolute',
     inset: -2,
     borderRadius: 12,
-    border: '2px solid #4F46E5',
+    border: '2px solid var(--cv-accent)',
     pointerEvents: 'none',
     animation: 'equipRingFlash 0.5s ease-out'
   },
@@ -367,8 +367,8 @@ const styles = {
     padding: 0
   },
   swatchActive: {
-    borderColor: '#4F46E5',
-    boxShadow: '0 0 0 2px #EEF2FF'
+    borderColor: 'var(--cv-accent)',
+    boxShadow: '0 0 0 2px var(--cv-accent-light)'
   }
 };
 

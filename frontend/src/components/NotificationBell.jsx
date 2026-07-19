@@ -12,17 +12,44 @@
 import React, { useState, useEffect, useRef } from 'react';
 import NotificationCenter from './NotificationCenter';
 
+// Settings → Notifications → Sound: a short synthesized "ding", no audio asset needed.
+const playNotificationSound = () => {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (err) {
+    console.warn('Notification sound failed:', err);
+  }
+};
+
 const NotificationBell = ({ socket }) => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [showCenter,  setShowCenter]  = useState(false);
+  const [prefs, setPrefs] = useState({ soundEnabled: true });
   const bellRef = useRef(null);
+
+  // Socket callback below is registered once and closes over stale state, so read
+  // prefs through a ref that's always current instead of re-subscribing on every change.
+  const prefsRef = useRef(prefs);
+  useEffect(() => { prefsRef.current = prefs; }, [prefs]);
 
   useEffect(() => {
     fetchUnreadCount();
+    fetchPrefs();
 
     if (socket) {
       socket.on('newNotification', (notification) => {
         setUnreadCount(prev => prev + 1);
+        if (prefsRef.current.soundEnabled) playNotificationSound();
         showToast(notification);
       });
     }
@@ -31,6 +58,22 @@ const NotificationBell = ({ socket }) => {
       if (socket) socket.off('newNotification');
     };
   }, [socket]); // eslint-disable-line
+
+  const fetchPrefs = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(
+        `${process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com'}/api/notifications/settings`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (response.ok) {
+        const data = await response.json();
+        setPrefs(p => ({ ...p, ...data.settings }));
+      }
+    } catch (err) {
+      console.error('Fetch notification prefs error:', err);
+    }
+  };
 
   // ── Fetch unread count — UNCHANGED ────────────────────────────────────────
   const fetchUnreadCount = async () => {
@@ -60,7 +103,7 @@ const NotificationBell = ({ socket }) => {
       padding: 14px 18px;
       border-radius: 12px;
       box-shadow: 0 8px 24px rgba(0,0,0,0.14);
-      border-left: 4px solid #6366f1;
+      border-left: 4px solid var(--cv-accent-mid);
       z-index: 10000;
       min-width: 280px;
       max-width: 380px;
@@ -68,15 +111,23 @@ const NotificationBell = ({ socket }) => {
       cursor: pointer;
     `;
 
+    // Escape before building innerHTML — title/message can originate from
+    // teacher-entered text (quiz titles, session names), so treat as untrusted.
+    const div = document.createElement('div');
+    div.textContent = notification.title || 'New Notification';
+    const safeTitle = div.innerHTML;
+    div.textContent = notification.message || '';
+    const safeMessage = div.innerHTML;
+
     toast.innerHTML = `
       <div style="display:flex;align-items:flex-start;gap:12px;">
         <span style="font-size:22px;flex-shrink:0;">${notification.icon || '🔔'}</span>
         <div style="flex:1;min-width:0;">
           <div style="font-weight:700;color:#0f172a;font-size:14px;margin-bottom:3px;">
-            ${notification.title || 'New Notification'}
+            ${safeTitle}
           </div>
           <div style="font-size:13px;color:#64748b;line-height:1.4;">
-            ${notification.message || ''}
+            ${safeMessage}
           </div>
         </div>
         <button onclick="this.parentElement.parentElement.remove()"

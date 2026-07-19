@@ -319,7 +319,7 @@ const styles = {
   schoolLine: {
     margin: '2px 0 0',
     fontSize: 13,
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     fontWeight: 600
   },
   statRow: {
@@ -362,7 +362,7 @@ const styles = {
   editLink: {
     background: 'transparent',
     border: 'none',
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     fontSize: 12,
     fontWeight: 700,
     cursor: 'pointer',
@@ -403,7 +403,7 @@ const styles = {
   credBadge: {
     margin: '0 0 6px',
     fontSize: 13,
-    color: '#4F46E5',
+    color: 'var(--cv-accent)',
     fontWeight: 600
   },
   formLabel: {
@@ -435,7 +435,7 @@ const styles = {
     padding: '8px 14px',
     borderRadius: 8,
     border: 'none',
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: '#FFFFFF',
     fontSize: 13,
     fontWeight: 700,

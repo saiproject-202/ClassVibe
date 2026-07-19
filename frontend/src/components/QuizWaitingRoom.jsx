@@ -125,15 +125,15 @@ const QuizWaitingRoom = ({ session, onClose, socket }) => {
                     onClick={() => allowStudentChoice && handleSelectTeam(team.teamId)}
                     style={{
                       ...styles.teamCard,
-                      borderColor: isMine ? (team.color || '#4F46E5') : '#e0e0e0',
-                      backgroundColor: isMine ? `${team.color || '#4F46E5'}1A` : '#fff',
+                      borderColor: isMine ? (team.color || 'var(--cv-accent)') : '#e0e0e0',
+                      backgroundColor: isMine ? `${team.color || 'var(--cv-accent)'}1A` : '#fff',
                       cursor: allowStudentChoice ? 'pointer' : 'default'
                     }}
                   >
                     <div style={styles.teamCardIcon}>{team.icon || '🏳️'}</div>
                     <div style={styles.teamCardName}>{team.name}</div>
                     <div style={styles.teamCardCount}>{count} joined</div>
-                    {isMine && <div style={{ ...styles.teamCardBadge, backgroundColor: team.color || '#4F46E5' }}>You're here</div>}
+                    {isMine && <div style={{ ...styles.teamCardBadge, backgroundColor: team.color || 'var(--cv-accent)' }}>You're here</div>}
                   </div>
                 );
               })}

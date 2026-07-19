@@ -130,16 +130,6 @@ export const Settings = ({ onClose, onUserUpdated, isDark }) => {
             <p style={ST.hint}>Email is set at registration and cannot be changed here.</p>
           </div>
 
-          {/* ── Password (readonly) ── */}
-          <div style={ST.field}>
-            <div style={ST.labelRow}>
-              <label style={{ ...ST.label, color: mTxt2 }}>Password</label>
-              <span style={ST.readonlyPill}>Read only</span>
-            </div>
-            <input style={{ ...ST.input, ...ST.readonlyInput, backgroundColor: mInpRo, color: dk?'#64748b':'#94a3b8', borderColor: mBdr }} value="••••••••••••" readOnly />
-            <p style={ST.hint}>To change your password, use the password-reset flow on the login page.</p>
-          </div>
-
           {/* Message */}
           {msg && (
             <div style={{ ...ST.msgBox, backgroundColor: msg.startsWith('✅') ? '#f0fdf4' : '#fef2f2', color: msg.startsWith('✅') ? '#15803d' : '#dc2626', borderColor: msg.startsWith('✅') ? '#bbf7d0' : '#fecaca' }}>
@@ -171,7 +161,7 @@ const ST = {
   photoSection:{ display:'flex', flexDirection:'column', alignItems:'center', gap:12, padding:'20px 0', borderBottom:'1px solid #f1f5f9' },
   photoWrapper:{ position:'relative', width:88, height:88 },
   photoImg:   { width:88, height:88, borderRadius:'50%', objectFit:'cover', border:'3px solid #e2e8f0' },
-  photoPlaceholder:{ width:88, height:88, borderRadius:'50%', backgroundColor:'#6366f1', color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:'700' },
+  photoPlaceholder:{ width:88, height:88, borderRadius:'50%', backgroundColor:'var(--cv-accent-mid)', color:'white', display:'flex', alignItems:'center', justifyContent:'center', fontSize:28, fontWeight:'700' },
   photoActions:{ display:'flex', gap:10 },
   uploadBtn:  { padding:'7px 14px', fontSize:13, fontWeight:'600', backgroundColor:'#eef2ff', color:'#4f46e5', border:'1px solid #c7d2fe', borderRadius:8, cursor:'pointer' },
   removeBtn:  { padding:'7px 14px', fontSize:13, fontWeight:'600', backgroundColor:'#fee2e2', color:'#ef4444', border:'1px solid #fecaca', borderRadius:8, cursor:'pointer' },
@@ -187,7 +177,7 @@ const ST = {
   msgBox:     { padding:'10px 14px', borderRadius:8, border:'1px solid', fontSize:13, fontWeight:'500' },
   footer:     { display:'flex', gap:10, padding:'16px 24px', borderTop:'1px solid #e2e8f0', flexShrink:0 },
   cancelBtn:  { flex:1, padding:12, fontSize:14, fontWeight:'600', backgroundColor:'#f1f5f9', color:'#475569', border:'none', borderRadius:8, cursor:'pointer' },
-  saveBtn:    { flex:2, padding:12, fontSize:14, fontWeight:'700', backgroundColor:'#6366f1', color:'white', border:'none', borderRadius:8, cursor:'pointer' },
+  saveBtn:    { flex:2, padding:12, fontSize:14, fontWeight:'700', backgroundColor:'var(--cv-accent-mid)', color:'white', border:'none', borderRadius:8, cursor:'pointer' },
 };
 
 
@@ -314,7 +304,7 @@ const Whiteboard = ({ onClose }) => {
             style={{
               ...WB.colorDot,
               backgroundColor: c,
-              outline: (color === c && tool === 'pen') ? '3px solid #6366f1' : '2px solid #e2e8f0',
+              outline: (color === c && tool === 'pen') ? '3px solid var(--cv-accent-mid)' : '2px solid #e2e8f0',
               outlineOffset: 2,
             }}
             title={c}
@@ -481,10 +471,10 @@ const Sidebar = ({
                     style={{
                       ...styles.navItem,
                       backgroundColor: activeNavItem === item.label
-                        ? (isDark ? '#1e3a5f' : '#EEF2FF')
+                        ? (isDark ? '#1e3a5f' : 'var(--cv-accent-light)')
                         : 'transparent',
                       color: activeNavItem === item.label
-                        ? (isDark ? '#818cf8' : '#4F46E5')
+                        ? (isDark ? '#818cf8' : 'var(--cv-accent)')
                         : (isDark ? '#cbd5e1' : '#374151'),
                     }}
                     onClick={() => handleNavClick(item.label)}
@@ -598,7 +588,7 @@ const styles = {
   navTextWrap: { display:'flex', flexDirection:'column', flex:1 },
   navLabel:    { fontSize:'14px', fontWeight:'500' },
   navSub:      { fontSize:'11px', color:'#9ca3af', marginTop:'1px' },
-  navActive:   { position:'absolute', left:0, top:0, bottom:0, width:'3px', backgroundColor:'#4F46E5', borderRadius:'0 3px 3px 0' },
+  navActive:   { position:'absolute', left:0, top:0, bottom:0, width:'3px', backgroundColor:'var(--cv-accent)', borderRadius:'0 3px 3px 0' },
 
   // Participants panel
   participantsPanel:   { padding:'16px 20px', borderBottom:'1px solid #f3f4f6', backgroundColor:'#fafafa' },
@@ -622,7 +612,7 @@ const styles = {
   engagementScore:   { fontSize:'24px', fontWeight:'800' },
   engagementLabel:   { fontSize:'11px', color:'#6b7280' },
   engagementBar:     { height:'4px', backgroundColor:'#e5e7eb', borderRadius:'2px', overflow:'hidden' },
-  engagementFill:    { height:'100%', backgroundColor:'#4F46E5', borderRadius:'2px', transition:'width 0.5s' },
+  engagementFill:    { height:'100%', backgroundColor:'var(--cv-accent)', borderRadius:'2px', transition:'width 0.5s' },
 
   // Student actions
   studentActionsPanel: { padding:'12px 20px', borderBottom:'1px solid #f3f4f6' },
@@ -642,20 +632,20 @@ const styles = {
   description:   { fontSize:'13px', color:'#666', marginBottom:'10px' },
   qrSection:     { textAlign:'center', paddingTop:6 },
   qrCode:        { width:'180px', height:'180px', border:'2px solid #ddd', borderRadius:'8px', padding:'6px', objectFit:'contain', backgroundColor:'white' },
-  pinDisplay:    { fontSize:'16px', fontWeight:'700', color:'#6366f1', marginTop:'8px' },
-  button:        { padding:'10px 14px', fontSize:'14px', fontWeight:'600', backgroundColor:'#6366f1', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', marginTop:8 },
+  pinDisplay:    { fontSize:'16px', fontWeight:'700', color:'var(--cv-accent-mid)', marginTop:'8px' },
+  button:        { padding:'10px 14px', fontSize:'14px', fontWeight:'600', backgroundColor:'var(--cv-accent-mid)', color:'white', border:'none', borderRadius:'6px', cursor:'pointer', marginTop:8 },
   smallBtn:      { padding:'5px 8px', marginRight:4, fontSize:12, borderRadius:5, border:'1px solid #ddd', cursor:'pointer', background:'#fff' },
   errorText:     { fontSize:'12px', color:'#dc3545', padding:'6px 8px', backgroundColor:'#fee', borderRadius:'4px', marginTop:8 },
   successText:   { fontSize:'12px', color:'#28a745', padding:'6px 8px', backgroundColor:'#efe', borderRadius:'4px', marginTop:8 },
   activeUsersList:  { display:'flex', flexDirection:'column', gap:'6px' },
   activeUserItem:   { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', backgroundColor:'#eef2ff', borderRadius:'6px' },
   activeUserLeft:   { display:'flex', alignItems:'center', gap:'8px' },
-  activeStatusDot:  { width:'8px', height:'8px', borderRadius:'50%', backgroundColor:'#6366f1', flexShrink:0 },
+  activeStatusDot:  { width:'8px', height:'8px', borderRadius:'50%', backgroundColor:'var(--cv-accent-mid)', flexShrink:0 },
   activeUserName:   { fontSize:'13px', color:'#333', fontWeight:'500' },
   messageCount:     { fontSize:'11px', color:'#4f46e5', backgroundColor:'white', padding:'2px 7px', borderRadius:'10px', fontWeight:'600', border:'1px solid #c7d2fe' },
   statItem:  { display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 0', borderBottom:'1px solid #f0f0f0' },
   statLabel: { fontSize:'13px', color:'#666' },
-  statValue: { fontSize:'15px', fontWeight:'600', color:'#6366f1' },
+  statValue: { fontSize:'15px', fontWeight:'600', color:'var(--cv-accent-mid)' },
 };
 
 export default Sidebar;

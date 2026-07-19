@@ -866,3 +866,51 @@ button:active:not(:disabled) {
   animation: spin 1s linear infinite;
   margin: 20px auto;
 }
+
+/* ============================================
+   ACCENT COLOR (Settings → Preferences)
+   Default values are byte-identical to the hardcoded indigo this app always used
+   (#4F46E5 / #4338CA / #EEF2FF / #6366f1), so picking "Blue" changes nothing —
+   only choosing a different swatch actually recolors anything.
+   ============================================ */
+:root {
+  --cv-accent: #4F46E5;
+  --cv-accent-hover: #4338CA;
+  --cv-accent-light: #EEF2FF;
+  --cv-accent-mid: #6366f1;
+}
+
+/* ============================================
+   ACCESSIBILITY (Settings → Preferences)
+   ============================================ */
+
+/* Large Text — scales the whole app like browser zoom, so it works regardless of
+   whether a given element's font-size was set in px or rem. */
+html.cv-large-text {
+  zoom: 1.15;
+}
+
+/* High Contrast — a broad filter boost rather than per-component overrides, so it
+   applies uniformly across every screen without needing a second color palette. */
+html.cv-high-contrast body {
+  filter: contrast(1.25) saturate(1.15);
+}
+
+/* Reduced Motion — the standard "kill all motion" pattern (mirrors the OS-level
+   prefers-reduced-motion media query), applied on demand via a class so it works
+   even on an OS that hasn't set the system preference. */
+html.cv-reduced-motion *,
+html.cv-reduced-motion *::before,
+html.cv-reduced-motion *::after {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.001ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* Keyboard Navigation — a much more visible focus ring for keyboard users
+   (mouse clicks still show the browser's default, since :focus-visible skips them). */
+html.cv-keyboard-nav *:focus-visible {
+  outline: 3px solid var(--cv-accent) !important;
+  outline-offset: 2px !important;
+}

@@ -390,9 +390,9 @@ const styles = {
     cursor: 'pointer'
   },
   pillActive: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#EEF2FF',
-    color: '#4F46E5'
+    borderColor: 'var(--cv-accent)',
+    backgroundColor: 'var(--cv-accent-light)',
+    color: 'var(--cv-accent)'
   },
   swatchRow: {
     display: 'flex',
@@ -410,8 +410,8 @@ const styles = {
     padding: 0
   },
   swatchActive: {
-    borderColor: '#4F46E5',
-    boxShadow: '0 0 0 2px #EEF2FF'
+    borderColor: 'var(--cv-accent)',
+    boxShadow: '0 0 0 2px var(--cv-accent-light)'
   },
   slotRow: {
     display: 'flex',
@@ -447,8 +447,8 @@ const styles = {
     cursor: 'pointer'
   },
   emoteBtnActive: {
-    borderColor: '#4F46E5',
-    backgroundColor: '#EEF2FF'
+    borderColor: 'var(--cv-accent)',
+    backgroundColor: 'var(--cv-accent-light)'
   },
   emoteIcon: {
     fontSize: 18
@@ -480,7 +480,7 @@ const styles = {
     padding: '10px 14px',
     borderRadius: 8,
     border: 'none',
-    backgroundColor: '#4F46E5',
+    backgroundColor: 'var(--cv-accent)',
     color: '#FFFFFF',
     fontSize: 14,
     fontWeight: 700,

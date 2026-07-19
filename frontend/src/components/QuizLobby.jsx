@@ -286,8 +286,8 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
                     onClick={() => clickable && handleSelectTeam(team.teamId)}
                     style={{
                       ...styles.teamCard,
-                      borderColor: isMine ? (team.color || '#4F46E5') : '#e0e0e0',
-                      backgroundColor: isMine ? `${team.color || '#4F46E5'}1A` : '#fff',
+                      borderColor: isMine ? (team.color || 'var(--cv-accent)') : '#e0e0e0',
+                      backgroundColor: isMine ? `${team.color || 'var(--cv-accent)'}1A` : '#fff',
                       cursor: clickable ? 'pointer' : 'default',
                       // ✅ NEW: brief scale-bounce on selection — subtle, not looping
                       animation: justSelected === team.teamId ? 'teamBounce 0.3s ease' : 'none'
@@ -296,7 +296,7 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
                     <div style={styles.teamCardIcon}>{team.icon || '🏳️'}</div>
                     <div style={styles.teamCardName}>{team.name}</div>
                     <div style={styles.teamCardCount}>{count} joined</div>
-                    {isMine && <div style={{ ...styles.teamCardBadge, backgroundColor: team.color || '#4F46E5' }}>You're here</div>}
+                    {isMine && <div style={{ ...styles.teamCardBadge, backgroundColor: team.color || 'var(--cv-accent)' }}>You're here</div>}
                   </div>
                 );
               })}
@@ -378,7 +378,7 @@ const styles = {
   overlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.9)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 2000, padding: '16px' },
   modal: { backgroundColor: 'white', borderRadius: '12px', width: '90%', maxWidth: '600px', maxHeight: '90vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   loadingBox: { padding: '60px 20px', textAlign: 'center' },
-  spinner: { width: 40, height: 40, border: '4px solid #eee', borderTop: '4px solid #4F46E5', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' },
+  spinner: { width: 40, height: 40, border: '4px solid #eee', borderTop: '4px solid var(--cv-accent)', borderRadius: '50%', margin: '0 auto', animation: 'spin 1s linear infinite' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '20px', borderBottom: '2px solid #e0e0e0', backgroundColor: '#075E54' },
   title: { margin: 0, fontSize: '20px', fontWeight: '600', color: 'white' },
   subtitle: { margin: '4px 0 0', fontSize: '13px', color: '#D7F0DD' },

@@ -3,7 +3,7 @@
 //
 // CHANGES: Visual redesign only — ALL socket logic and poll functionality UNCHANGED
 //   - Clean white cards with subtle borders
-//   - Indigo (#6366f1) instead of old green accent
+//   - Indigo (var(--cv-accent-mid)) instead of old green accent
 //   - Results shown with progress bars
 //   - Open answer textarea styled properly
 //   - Create poll form matches MessageInput card style
@@ -291,7 +291,7 @@ const S = {
 
   // Buttons
   btn:          { padding: '8px 16px', fontSize: 13, fontWeight: '600', border: 'none', borderRadius: 8, cursor: 'pointer', transition: 'background 0.15s' },
-  btnPrimary:   { padding: '8px 16px', fontSize: 13, fontWeight: '700', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
+  btnPrimary:   { padding: '8px 16px', fontSize: 13, fontWeight: '700', backgroundColor: 'var(--cv-accent-mid)', color: 'white', border: 'none', borderRadius: 8, cursor: 'pointer' },
   btnSecondary: { padding: '8px 16px', fontSize: 13, fontWeight: '600', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer' },
 
   // Create card
@@ -314,7 +314,7 @@ const S = {
   typePill:   { fontSize: 11, fontWeight: '700', padding: '3px 8px', borderRadius: 20 },
   typePillActive: { backgroundColor: '#dcfce7', color: '#15803d' },
   typePillClosed: { backgroundColor: '#f1f5f9', color: '#64748b' },
-  pollTypePill:{ fontSize: 11, fontWeight: '600', color: '#6366f1', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 20, padding: '2px 8px' },
+  pollTypePill:{ fontSize: 11, fontWeight: '600', color: 'var(--cv-accent-mid)', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 20, padding: '2px 8px' },
   closeBtn:   { padding: '4px 10px', fontSize: 12, fontWeight: '600', backgroundColor: '#fee2e2', color: '#ef4444', border: '1px solid #fecaca', borderRadius: 6, cursor: 'pointer' },
   pollQuestion:{ fontSize: 15, fontWeight: '600', color: '#1e293b', margin: '0 0 14px', lineHeight: 1.4 },
 
@@ -325,9 +325,9 @@ const S = {
   resultRow:  { display: 'flex', flexDirection: 'column', gap: 4 },
   resultLabel:{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   optText:    { fontSize: 13, fontWeight: '500', color: '#1e293b' },
-  optPct:     { fontSize: 12, fontWeight: '700', color: '#6366f1' },
+  optPct:     { fontSize: 12, fontWeight: '700', color: 'var(--cv-accent-mid)' },
   barTrack:   { width: '100%', height: 6, backgroundColor: '#f1f5f9', borderRadius: 3, overflow: 'hidden' },
-  barFill:    { height: '100%', backgroundColor: '#6366f1', borderRadius: 3, transition: 'width 0.4s ease' },
+  barFill:    { height: '100%', backgroundColor: 'var(--cv-accent-mid)', borderRadius: 3, transition: 'width 0.4s ease' },
   voteCount:  { fontSize: 11, color: '#94a3b8' },
   totalVotes: { fontSize: 12, color: '#64748b', marginTop: 6, textAlign: 'right', fontStyle: 'italic' },
 
@@ -338,7 +338,7 @@ const S = {
   answersList:{ marginTop: 12, borderTop: '1px solid #f1f5f9', paddingTop: 12 },
   answersTitle:{ fontSize: 12, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.4px', margin: '0 0 8px' },
   answerItem: { display: 'flex', flexDirection: 'column', gap: 2, padding: '8px 12px', backgroundColor: '#f8fafc', borderRadius: 8, marginBottom: 6 },
-  answerAuthor:{ fontSize: 11, fontWeight: '700', color: '#6366f1' },
+  answerAuthor:{ fontSize: 11, fontWeight: '700', color: 'var(--cv-accent-mid)' },
   answerText: { fontSize: 13, color: '#1e293b', lineHeight: 1.4 },
 
   // Empty state

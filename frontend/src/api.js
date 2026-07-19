@@ -23,11 +23,39 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor — UNCHANGED
+// Auth Spec v2 — endpoints where a 401/403 means "this attempt was rejected"
+// (wrong password, unverified email, invalid/expired one-time token, bad Google
+// sign-in), NOT "your existing session went stale." The response interceptor
+// below must never auto-logout/reload for these — AuthScreen.jsx's own catch
+// block already shows the real error message inline, and a global reload would
+// wipe it out before the user ever saw it.
+const PUBLIC_AUTH_PATHS = [
+  '/auth/login',
+  '/auth/register',
+  '/auth/google',
+  '/auth/check-email',
+  '/auth/verify-email',
+  '/auth/resend-verification',
+  '/auth/forgot-password',
+  '/auth/reset-password',
+  '/auth/student-guest-auth'
+];
+
+const isPublicAuthRequest = (config) =>
+  !!config?.url && PUBLIC_AUTH_PATHS.some((path) => config.url.includes(path));
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 403 || error.response?.status === 401) {
+    const status = error.response?.status;
+
+    // Backend convention (consistent across every route): 401 means the token
+    // itself is missing/invalid/expired — the session is genuinely dead, so a
+    // global logout is correct. 403 means the token is VALID but the caller
+    // lacks permission for this specific resource (wrong role, not a group
+    // member, not the admin, etc.) — that's a normal per-request rejection the
+    // calling code already handles locally, not a reason to nuke the session.
+    if (status === 401 && !isPublicAuthRequest(error.config)) {
       console.warn('Token expired or invalid - clearing session');
       localStorage.removeItem('token');
       localStorage.removeItem('user');
@@ -84,9 +112,11 @@ export const register = async (email, password, name = '', role = 'student') => 
   }
 };
 
-export const login = async (email, password) => {
+// rememberMe defaults true (matches the previous unconditional-long-session
+// behavior) — Phase 4's AuthScreen is the first caller to actually pass false.
+export const login = async (email, password, rememberMe = true) => {
   try {
-    const response = await api.post('/auth/login', { email, password });
+    const response = await api.post('/auth/login', { email, password, rememberMe });
     return response.data;
   } catch (error) {
     console.error('Login API error:', error);
@@ -103,6 +133,84 @@ export const studentGuestAuth = async (email, password, name) => {
     return response.data;
   } catch (error) {
     console.error('Student guest auth error:', error);
+    throw error;
+  }
+};
+
+// ============================================
+// AUTH SPEC v2 — Phase 2/3 endpoints, wired to the UI in Phase 4
+// ============================================
+
+export const googleAuth = async (idToken, role, rememberMe = true) => {
+  try {
+    const response = await api.post('/auth/google', { idToken, role, rememberMe });
+    return response.data;
+  } catch (error) {
+    console.error('Google auth API error:', error);
+    throw error;
+  }
+};
+
+export const verifyEmail = async (token) => {
+  try {
+    const response = await api.post('/auth/verify-email', { token });
+    return response.data;
+  } catch (error) {
+    console.error('Verify email API error:', error);
+    throw error;
+  }
+};
+
+export const resendVerification = async (email) => {
+  try {
+    const response = await api.post('/auth/resend-verification', { email });
+    return response.data;
+  } catch (error) {
+    console.error('Resend verification API error:', error);
+    throw error;
+  }
+};
+
+export const forgotPassword = async (email) => {
+  try {
+    const response = await api.post('/auth/forgot-password', { email });
+    return response.data;
+  } catch (error) {
+    console.error('Forgot password API error:', error);
+    throw error;
+  }
+};
+
+export const resetPassword = async (token, newPassword) => {
+  try {
+    const response = await api.post('/auth/reset-password', { token, newPassword });
+    return response.data;
+  } catch (error) {
+    console.error('Reset password API error:', error);
+    throw error;
+  }
+};
+
+// Public, unauthenticated — safe to call before the user has a token.
+export const getAuthProviders = async () => {
+  try {
+    const response = await api.get('/auth/providers');
+    return response.data;
+  } catch (error) {
+    console.error('Get auth providers API error:', error);
+    throw error;
+  }
+};
+
+// ChatGPT/Notion/Slack-style entry flow — the single email step the shared
+// auth screen submits before deciding whether to show a password field
+// (existing account) or a name/password registration form (new account).
+export const checkEmail = async (email) => {
+  try {
+    const response = await api.post('/auth/check-email', { email });
+    return response.data;
+  } catch (error) {
+    console.error('Check email API error:', error);
     throw error;
   }
 };
@@ -167,6 +275,16 @@ export const endSession = async (groupId) => {
     return response.data;
   } catch (error) {
     console.error('End session API error:', error);
+    throw error;
+  }
+};
+
+export const toggleModeratedChat = async (groupId, enabled) => {
+  try {
+    const response = await api.post(`/groups/${groupId}/moderated-chat`, { enabled });
+    return response.data;
+  } catch (error) {
+    console.error('Toggle moderated chat API error:', error);
     throw error;
   }
 };

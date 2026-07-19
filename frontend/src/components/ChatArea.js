@@ -11,7 +11,7 @@
 //   7. Leaderboard refreshes on every new quiz (leaderbarBar resets when quiz starts)
 //   8. All existing logic UNCHANGED (polls, quiz, files, context menu, fullscreen, PDF)
 
-import React, { useRef, useEffect, useState } from 'react';
+import React, { useRef, useEffect, useState, useMemo } from 'react';
 import socket from '../socket';
 import LbAvatar from './LbAvatar';
 
@@ -23,7 +23,10 @@ const ChatArea = ({
   onMessageEdited,
   onMessageDeleted,
   userRole,
+  moderatedChat = false,
+  isAdmin       = false,
 }) => {
+  const [teacherFilter, setTeacherFilter] = useState('all'); // 'all' | 'unread' | a studentId
   const messagesEndRef       = useRef(null);
   const messagesContainerRef = useRef(null);
 
@@ -142,7 +145,7 @@ const ChatArea = ({
     !prev || new Date(cur.createdAt).toDateString() !== new Date(prev.createdAt).toDateString();
 
   const getAvatarColor = (u) => {
-    const c = ['#6366f1','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#14b8a6'];
+    const c = ['var(--cv-accent-mid)','#ec4899','#f59e0b','#10b981','#3b82f6','#8b5cf6','#ef4444','#14b8a6'];
     return c[(u?.charCodeAt(0) || 0) % c.length];
   };
 
@@ -154,7 +157,7 @@ const ChatArea = ({
         ? { bg: '#1e3a5f', border: '#3730a3', tick: '#818cf8' }
         : { bg: '#064e3b', border: '#065f46', tick: '#34d399' })
     : (userRole === 'teacher'
-        ? { bg: '#eef2ff', border: '#c7d2fe', tick: '#6366f1' }
+        ? { bg: '#eef2ff', border: '#c7d2fe', tick: 'var(--cv-accent-mid)' }
         : { bg: '#f0fdf4', border: '#bbf7d0', tick: '#10b981' });
 
   // ── Context menu ──────────────────────────────────────────────────────────
@@ -203,10 +206,10 @@ const ChatArea = ({
             return (
               <div key={i}>
                 {voted ? (
-                  <div style={{ ...S.pollResult, borderColor: mine ? '#6366f1' : '#e2e8f0', borderWidth: mine ? '2px' : '1px' }}>
+                  <div style={{ ...S.pollResult, borderColor: mine ? 'var(--cv-accent-mid)' : '#e2e8f0', borderWidth: mine ? '2px' : '1px' }}>
                     <div style={S.pollResultTop}><span style={S.pollOptText}>{opt.text || opt}</span><span style={S.pollPct}>{pct}%</span></div>
-                    <div style={S.pollBar}><div style={{ ...S.pollFill, width: `${pct}%`, backgroundColor: mine ? '#6366f1' : '#94a3b8' }} /></div>
-                    <div style={S.pollVotes}>{votes} vote{votes !== 1 ? 's' : ''}{mine && <span style={{ color: '#6366f1', fontWeight: 'bold' }}> ✓</span>}</div>
+                    <div style={S.pollBar}><div style={{ ...S.pollFill, width: `${pct}%`, backgroundColor: mine ? 'var(--cv-accent-mid)' : '#94a3b8' }} /></div>
+                    <div style={S.pollVotes}>{votes} vote{votes !== 1 ? 's' : ''}{mine && <span style={{ color: 'var(--cv-accent-mid)', fontWeight: 'bold' }}> ✓</span>}</div>
                   </div>
                 ) : (
                   <button onClick={() => handlePollVote(message._id, i)} style={S.pollBtn}>{opt.text || opt}</button>
@@ -305,13 +308,40 @@ const ChatArea = ({
   };
 
   // ── Filter ────────────────────────────────────────────────────────────────
-  const filtered = searchQuery.trim()
+  const searched = searchQuery.trim()
     ? messages.filter(m =>
         m.content?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.sender?.username?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         m.sender?.name?.toLowerCase().includes(searchQuery.toLowerCase())
       )
     : messages;
+
+  // Teacher Moderated Chat — quick filters (All / Unread / per-student), reusing
+  // the existing Message.readBy field. Applied on top of the search filter above.
+  const moderatedStudents = useMemo(() => {
+    if (!isAdmin || !moderatedChat) return [];
+    const seen = new Map();
+    messages.forEach(m => {
+      if (m.sender && m.sender._id !== currentUserId && !seen.has(m.sender._id)) {
+        seen.set(m.sender._id, m.sender);
+      }
+    });
+    return [...seen.values()];
+  }, [messages, isAdmin, moderatedChat, currentUserId]);
+
+  const filtered = useMemo(() => {
+    if (!isAdmin || !moderatedChat || teacherFilter === 'all') return searched;
+    if (teacherFilter === 'unread') {
+      return searched.filter(m =>
+        m.sender && m.sender._id !== currentUserId &&
+        !(m.readBy || []).some(r => (r.user?._id || r.user) === currentUserId)
+      );
+    }
+    // Per-student: that student's own messages plus anything addressed to them
+    return searched.filter(m =>
+      m.sender?._id === teacherFilter || m.recipient?._id === teacherFilter
+    );
+  }, [searched, isAdmin, moderatedChat, teacherFilter, currentUserId]);
 
   // ════════════════════════════════════════════════════════════════════════
   //  LEADERBOARD RENDERER
@@ -385,15 +415,26 @@ const ChatArea = ({
   };
 
   // ── Meta row ──────────────────────────────────────────────────────────────
+  const recipientLabel = (message) => {
+    if (!message.recipient) return null;
+    if (message.recipient._id === currentUserId) return '🔒 Private reply';
+    if (isAdmin || message.sender?._id === currentUserId) {
+      return `🔒 to ${message.recipient.name || message.recipient.username || 'student'}`;
+    }
+    return null;
+  };
+
   const renderMeta = (message) => {
     const isTeacher = message.sender?.role === 'teacher';
     const name      = message.sender?.name || message.sender?.username || 'Unknown';
+    const recLabel  = recipientLabel(message);
     return (
       <div style={S.meta}>
         <span style={{ ...S.metaName, color: getAvatarColor(message.sender?.username) }}>{name}</span>
         {isTeacher && <span style={S.teacherBadge}>Teacher</span>}
         <span style={S.metaTime}>{formatTime(message.createdAt)}</span>
         {message.isEdited && !message.isDeleted && <span style={S.editedLabel}>(edited)</span>}
+        {recLabel && <span style={S.recipientBadge}>{recLabel}</span>}
       </div>
     );
   };
@@ -431,6 +472,27 @@ const ChatArea = ({
 
       {/* ── Leaderboard (arrow or expanded bar) ── */}
       {renderLeaderboard()}
+
+      {/* ── Teacher Moderated Chat: student notice banner ── */}
+      {moderatedChat && !isAdmin && (
+        <div style={{ ...S.modNotice, backgroundColor: isDark?'#1e3a5f':'#eef2ff', borderBottom: isDark?'1px solid #3730a3':'1px solid #c7d2fe', color: isDark?'#a5b4fc':'#4f46e5' }}>
+          🛡 Teacher Moderated Chat is enabled. Your messages are visible only to the teacher unless the teacher replies.
+        </div>
+      )}
+
+      {/* ── Teacher Moderated Chat: quick filters ── */}
+      {moderatedChat && isAdmin && (
+        <div style={{ ...S.modFilterRow, backgroundColor: isDark?'#0f172a':'#f8fafc', borderBottom: isDark?'1px solid #334155':'1px solid #e2e8f0' }}>
+          <span style={{ ...S.modFilterLabel, color: isDark?'#94a3b8':'#64748b' }}>🛡 Moderated:</span>
+          <button onClick={() => setTeacherFilter('all')} style={{ ...S.modFilterChip, ...(teacherFilter==='all'?S.modFilterChipActive:{}) }}>All</button>
+          <button onClick={() => setTeacherFilter('unread')} style={{ ...S.modFilterChip, ...(teacherFilter==='unread'?S.modFilterChipActive:{}) }}>Unread</button>
+          {moderatedStudents.map(s => (
+            <button key={s._id} onClick={() => setTeacherFilter(s._id)} style={{ ...S.modFilterChip, ...(teacherFilter===s._id?S.modFilterChipActive:{}) }}>
+              {s.name || s.username}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* ── Messages ── */}
       <div style={S.msgContainer} ref={messagesContainerRef} onScroll={handleScroll}>
@@ -480,6 +542,7 @@ const ChatArea = ({
                       </div>
                       {!editing && (
                         <div style={S.ownFooter}>
+                          {recipientLabel(message) && <span style={S.recipientBadge}>{recipientLabel(message)}</span>}
                           {message.isEdited && !message.isDeleted && <span style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>(edited)</span>}
                           <span style={S.ownTime}>{formatTime(message.createdAt)}</span>
                           <span style={{ ...S.readTick, color: ownBubbleColor.tick }}>✓✓</span>
@@ -675,6 +738,13 @@ const S = {
   searchCount:  { fontSize: 12, color: '#64748b', whiteSpace: 'nowrap', fontWeight: '500', flexShrink: 0 },
   closeSearchBtn:{ padding: '5px 12px', fontSize: 12, fontWeight: '600', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 6, cursor: 'pointer', whiteSpace: 'nowrap', flexShrink: 0 },
 
+  // ── Teacher Moderated Chat ──
+  modNotice:    { padding: '8px 16px', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  modFilterRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', overflowX: 'auto', flexWrap: 'wrap' },
+  modFilterLabel: { fontSize: 12, fontWeight: '700', flexShrink: 0 },
+  modFilterChip: { padding: '4px 11px', fontSize: 12, fontWeight: '600', border: '1px solid #e2e8f0', borderRadius: 20, cursor: 'pointer', backgroundColor: 'transparent', color: '#64748b', whiteSpace: 'nowrap', flexShrink: 0 },
+  modFilterChipActive: { backgroundColor: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' },
+
   msgContainer: { flex: 1, overflowY: 'auto', padding: '20px 20px', display: 'flex', flexDirection: 'column', gap: 2 },
   empty:        { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' },
   dateSep:      { display: 'flex', justifyContent: 'center', margin: '16px 0 10px' },
@@ -690,17 +760,18 @@ const S = {
   teacherBadge: { fontSize: 10, fontWeight: '600', color: '#92400e', backgroundColor: '#fef3c7', border: '1px solid #fcd34d', borderRadius: 4, padding: '1px 6px' },
   metaTime:     { fontSize: 11, color: '#94a3b8' },
   editedLabel:  { fontSize: 11, color: '#94a3b8', fontStyle: 'italic' },
+  recipientBadge: { fontSize: 10, fontWeight: '600', color: '#4f46e5', backgroundColor: '#eef2ff', border: '1px solid #c7d2fe', borderRadius: 4, padding: '1px 6px' },
   bubble:       { padding: '10px 13px', border: '1px solid', wordWrap: 'break-word', position: 'relative', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', maxWidth: '100%' },
   ownFooter:    { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 4, paddingRight: 2 },
   ownTime:      { fontSize: 11, color: '#94a3b8' },
   readTick:     { fontSize: 11 },
   editInput:    { width: '100%', padding: '7px 10px', fontSize: 14, border: '1px solid #c7d2fe', borderRadius: 6, outline: 'none', backgroundColor: '#fff', boxSizing: 'border-box' },
-  saveBtn:      { padding: '5px 14px', fontSize: 12, fontWeight: '600', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer' },
+  saveBtn:      { padding: '5px 14px', fontSize: 12, fontWeight: '600', backgroundColor: 'var(--cv-accent-mid)', color: 'white', border: 'none', borderRadius: 5, cursor: 'pointer' },
   cancelBtn:    { padding: '5px 14px', fontSize: 12, fontWeight: '600', backgroundColor: '#f1f5f9', color: '#475569', border: '1px solid #e2e8f0', borderRadius: 5, cursor: 'pointer' },
   msgText:      { fontSize: 14, lineHeight: '21px', color: '#1e293b', wordBreak: 'break-word' },
   typingBubble: { display: 'flex', alignItems: 'center', padding: '8px 14px', backgroundColor: '#fff', border: '1px solid #e2e8f0', borderRadius: '3px 12px 12px 12px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' },
   dot:          { display: 'inline-block', width: 5, height: 5, backgroundColor: '#94a3b8', borderRadius: '50%', animation: 'bounce 1.4s infinite ease-in-out both' },
-  scrollBtn:    { position: 'absolute', bottom: 16, right: 16, width: 36, height: 36, borderRadius: '50%', backgroundColor: '#6366f1', color: 'white', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.3)', zIndex: 10 },
+  scrollBtn:    { position: 'absolute', bottom: 16, right: 16, width: 36, height: 36, borderRadius: '50%', backgroundColor: 'var(--cv-accent-mid)', color: 'white', border: 'none', fontSize: 18, cursor: 'pointer', boxShadow: '0 4px 12px rgba(99,102,241,0.3)', zIndex: 10 },
   ctxMenu:      { position: 'fixed', backgroundColor: 'white', borderRadius: 10, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', padding: '6px 0', zIndex: 1000, minWidth: 150, border: '1px solid #f1f5f9' },
   ctxItem:      { padding: '10px 16px', fontSize: 13, cursor: 'pointer', color: '#374151' },
 
@@ -712,7 +783,7 @@ const S = {
   pollResult:    { padding: '9px 12px', borderRadius: 7, backgroundColor: 'white' },
   pollResultTop: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 },
   pollOptText:   { fontSize: 13, color: '#1e293b', fontWeight: '500' },
-  pollPct:       { fontSize: 12, fontWeight: '700', color: '#6366f1' },
+  pollPct:       { fontSize: 12, fontWeight: '700', color: 'var(--cv-accent-mid)' },
   pollBar:       { width: '100%', height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, overflow: 'hidden', marginBottom: 4 },
   pollFill:      { height: '100%', transition: 'width 0.3s' },
   pollVotes:     { fontSize: 11, color: '#64748b' },
@@ -736,7 +807,7 @@ const S = {
   pdfPreview: { display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', backgroundColor: '#f8fafc', borderRadius: 8, marginBottom: 6, border: '1px solid #e2e8f0' },
   pdfName:    { fontSize: 13, fontWeight: '600', color: '#1e293b' },
   pdfSize:    { fontSize: 11, color: '#64748b' },
-  pdfBtn:     { flex: 1, padding: 7, fontSize: 12, fontWeight: '600', backgroundColor: '#6366f1', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' },
+  pdfBtn:     { flex: 1, padding: 7, fontSize: 12, fontWeight: '600', backgroundColor: 'var(--cv-accent-mid)', color: 'white', border: 'none', borderRadius: 6, cursor: 'pointer' },
   docLink:    { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', backgroundColor: '#f8fafc', borderRadius: 8, textDecoration: 'none', color: '#1e293b', border: '1px solid #e2e8f0' },
 
   fsOverlay: { position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.95)', zIndex: 2000, display: 'flex', flexDirection: 'column' },

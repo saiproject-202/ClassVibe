@@ -4,29 +4,17 @@
 const express = require('express');
 const router = express.Router();
 const Notification = require('../models/Notification');
-const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { authenticateToken } = require('../middleware/auth');
+
+// Settings → Notifications (General) toggle keys — whitelisted so PUT /settings
+// can't write arbitrary fields onto the user document.
+const NOTIF_PREF_KEYS = ['notificationsEnabled', 'emailNotifications', 'pushNotifications', 'soundEnabled', 'previewEnabled'];
 
 // ========================================
-// MIDDLEWARE
-// ========================================
-
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied' });
-  }
-  
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (error) {
-    res.status(403).json({ error: 'Invalid token' });
-  }
-};
-
+// MIDDLEWARE — Final audit: was a locally-duplicated JWT verifier, now the
+// canonical authenticateToken imported above. Every handler in this file only
+// ever reads req.userId, which the canonical middleware still sets identically.
 // ========================================
 // ROUTES
 // ========================================
@@ -146,23 +134,38 @@ router.delete('/clear-read', authenticateToken, async (req, res) => {
   }
 });
 
-// Get notification settings (for future use)
+// Get notification settings
 router.get('/settings', authenticateToken, async (req, res) => {
   try {
-    // In future, store user notification preferences
-    res.json({
-      settings: {
-        emailNotifications: true,
-        pushNotifications: true,
-        quizNotifications: true,
-        messageNotifications: true,
-        sessionNotifications: true
-      }
-    });
-    
+    const user = await User.findById(req.userId).select('notificationPreferences');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    res.json({ settings: user.notificationPreferences });
+
   } catch (error) {
     console.error('Get settings error:', error);
     res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+// Update notification settings
+router.put('/settings', authenticateToken, async (req, res) => {
+  try {
+    const user = await User.findById(req.userId);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+
+    for (const key of NOTIF_PREF_KEYS) {
+      if (typeof req.body[key] === 'boolean') {
+        user.notificationPreferences[key] = req.body[key];
+      }
+    }
+    await user.save();
+
+    res.json({ settings: user.notificationPreferences });
+
+  } catch (error) {
+    console.error('Update settings error:', error);
+    res.status(500).json({ error: 'Failed to update settings' });
   }
 });
 

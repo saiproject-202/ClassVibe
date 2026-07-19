@@ -105,7 +105,14 @@ const scheduledSessionSchema = new mongoose.Schema({
   },
 
   // ── Notifications ──
-  reminderSent: {
+  // Two independent tiers (replaces the old single reminderSent boolean) — see
+  // jobs/sessionReminder.js. Each fires once, independently, as its window opens.
+  reminder15Sent: {
+    type: Boolean,
+    default: false
+  },
+
+  reminder5Sent: {
     type: Boolean,
     default: false
   },

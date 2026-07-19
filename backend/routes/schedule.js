@@ -13,30 +13,13 @@ const ScheduledSession = require('../models/ScheduledSession');
 const Group = require('../models/Group');
 const User = require('../models/User');
 const Notification = require('../models/Notification');
-const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const { authenticateToken } = require('../middleware/auth');
 
 // ════════════════════════════════════════════
-// MIDDLEWARE — UNCHANGED
-// ════════════════════════════════════════════
-
-const authenticateToken = (req, res, next) => {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-
-  if (!token) {
-    return res.status(401).json({ error: 'Access denied' });
-  }
-
-  try {
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.userId = decoded.userId;
-    next();
-  } catch (error) {
-    res.status(403).json({ error: 'Invalid token' });
-  }
-};
-
+// MIDDLEWARE — Final audit: was a locally-duplicated JWT verifier, now the
+// canonical authenticateToken imported above. Every handler in this file only
+// ever reads req.userId, which the canonical middleware still sets identically.
 // ════════════════════════════════════════════
 // ✅ NEW: DRAFT ROUTES
 // ════════════════════════════════════════════
@@ -45,6 +28,7 @@ const authenticateToken = (req, res, next) => {
 router.post('/draft', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.role !== 'teacher') {
       return res.status(403).json({ error: 'Only teachers can save drafts' });
     }
@@ -99,6 +83,7 @@ router.post('/draft', authenticateToken, async (req, res) => {
 router.get('/drafts', authenticateToken, async (req, res) => {
   try {
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.role !== 'teacher') {
       return res.status(403).json({ error: 'Only teachers can view drafts' });
     }
@@ -154,6 +139,7 @@ router.post('/create', authenticateToken, async (req, res) => {
     }
 
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.role !== 'teacher') {
       return res.status(403).json({ error: 'Only teachers can create sessions' });
     }
@@ -202,19 +188,20 @@ router.post('/create', authenticateToken, async (req, res) => {
         const students = await User.find({ email: { $in: emailList }, role: 'student' }).select('_id');
         if (students.length > 0) {
           const teacher = await User.findById(req.userId);
-          const dt = session.scheduledDate
-            ? `${new Date(session.scheduledDate).toLocaleDateString()} at ${session.scheduledTime || ''}`
-            : session.scheduledTime || '';
+          const teacherName = teacher?.name || teacher?.username || 'Your teacher';
+          const formattedDate = session.scheduledDate
+            ? new Date(session.scheduledDate).toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' })
+            : null;
           await Notification.createBulkNotifications(
             students.map(s => s._id),
             {
               sender: req.userId,
               type: 'session_scheduled',
-              title: '📅 New Session Scheduled',
-              message: `${teacher?.name || teacher?.username} scheduled "${session.sessionName}"${dt ? ' on ' + dt : ''}`,
+              title: '📚 New Class Invitation',
+              message: `You've been invited to "${session.sessionName}". Teacher: ${teacherName}.${formattedDate ? ` Date: ${formattedDate}` : ''}${session.scheduledTime ? ` at ${session.scheduledTime}` : ''}.`,
               relatedSession: session._id,
               priority: 'medium',
-              icon: '📅',
+              icon: '📚',
               metadata: { sessionId: session._id.toString() }
             }
           );
@@ -239,6 +226,7 @@ router.get('/my-sessions', authenticateToken, async (req, res) => {
     const { status } = req.query;
 
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     if (user.role !== 'teacher') {
       return res.status(403).json({ error: 'Only teachers can view their sessions' });
     }
@@ -369,6 +357,24 @@ router.post('/:sessionId/start', authenticateToken, async (req, res) => {
     const joinUrl = `${process.env.FRONTEND_URL}?pin=${pin}`;
     const qrCode = await QRCode.toDataURL(joinUrl);
 
+    // Private Session system — seed the live Group's roster from this session's
+    // invited emails, resolving each to an existing User account where possible
+    // (unresolved emails still get a roster entry so the invite is honored the
+    // moment that person creates an account and joins). See POST /api/groups/join
+    // in server.js for how isPrivate+roster gate access once live.
+    const isPrivate = session.accessType === 'private';
+    let roster = [];
+    if (isPrivate && session.allowedEmails && session.allowedEmails.length > 0) {
+      const invitedUsers = await User.find({ email: { $in: session.allowedEmails } }).select('_id email');
+      const userIdByEmail = new Map(invitedUsers.map(u => [u.email, u._id]));
+      roster = session.allowedEmails.map(email => ({
+        email,
+        user: userIdByEmail.get(email) || null,
+        status: 'invited',
+        invitedAt: new Date()
+      }));
+    }
+
     // Create a live Group from this session
     const group = new Group({
       groupName:    session.sessionName,
@@ -377,7 +383,9 @@ router.post('/:sessionId/start', authenticateToken, async (req, res) => {
       pin,
       qrCode,
       onlineUsers:  [],
-      allowedEmails: session.allowedEmails  // transfer email restrictions
+      allowedEmails: session.allowedEmails,  // legacy field, kept for backward compat
+      isPrivate,
+      roster
     });
 
     await group.save();
@@ -390,11 +398,19 @@ router.post('/:sessionId/start', authenticateToken, async (req, res) => {
 
     console.log('✅ Scheduled session started:', session.sessionName);
 
-    // Notify registered students — socket + persistent DB notification
+    // Recipients = everyone who pre-registered UNION everyone invited by email
+    // (roster, resolved to an existing account) — not registeredStudents-only,
+    // so a Private Session's full invite list hears "class is live", not just
+    // the subset who separately opted into pre-registration.
+    const registeredIds = session.registeredStudents.map(s => s.user.toString());
+    const rosterUserIds = roster.filter(r => r.user).map(r => r.user.toString());
+    const recipientIds = [...new Set([...registeredIds, ...rosterUserIds])];
+
+    // Notify — socket + persistent DB notification
     const io = req.app.get('io');
     if (io) {
-      session.registeredStudents.forEach(student => {
-        io.to(student.user.toString()).emit('sessionStarted', {
+      recipientIds.forEach(userId => {
+        io.to(userId).emit('sessionStarted', {
           sessionName: session.sessionName,
           groupId: group._id,
           pin: group.pin
@@ -403,20 +419,19 @@ router.post('/:sessionId/start', authenticateToken, async (req, res) => {
     }
 
     try {
-      if (session.registeredStudents.length > 0) {
+      if (recipientIds.length > 0) {
         const teacher = await User.findById(session.teacher);
-        const studentIds = session.registeredStudents.map(s => s.user);
-        await Notification.createBulkNotifications(studentIds, {
+        await Notification.createBulkNotifications(recipientIds, {
           sender: session.teacher,
           type: 'session_started',
           title: '🚀 Session is Live Now!',
-          message: `${teacher?.name || teacher?.username} started "${session.sessionName}". PIN: ${group.pin}`,
+          message: `${teacher?.name || teacher?.username} started "${session.sessionName}". Join now!`,
           relatedGroup: group._id,
           priority: 'high',
           icon: '🚀',
           metadata: { groupId: group._id.toString(), pin: group.pin }
         });
-        console.log(`📢 Notified ${studentIds.length} registered students that session went live`);
+        console.log(`📢 Notified ${recipientIds.length} student(s) that session went live`);
       }
     } catch (notifErr) {
       console.error('Start-session notification error (non-fatal):', notifErr.message);
@@ -485,6 +500,7 @@ router.post('/:sessionId/verify-access', authenticateToken, async (req, res) => 
     if (!session) return res.status(404).json({ error: 'Session not found' });
 
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     const { password } = req.body;
 
     // Public sessions — always allowed
@@ -613,6 +629,7 @@ router.post('/:sessionId/register', authenticateToken, async (req, res) => {
     }
 
     const user = await User.findById(req.userId);
+    if (!user) return res.status(401).json({ error: 'User not found' });
     const result = await session.registerStudent(req.userId, user.email);
 
     if (!result.success) {
