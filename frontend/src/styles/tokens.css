@@ -1,0 +1,89 @@
+/* ============================================================================
+   DESIGN SYSTEM — TOKENS (Phase 1)
+   ============================================================================
+   Extends the existing --cv-* custom-property namespace (see the
+   --cv-accent/--cv-accent-hover/--cv-accent-light/--cv-accent-mid vars in
+   App.css, which stay exactly as-is and are NOT redefined here — they're
+   runtime-overridden by theme.js's applyAccentColor() for the Settings →
+   accent-color picker, and that must keep working unmodified).
+
+   This file only ADDS new tokens. Nothing here replaces or removes anything
+   that already exists. It is not yet consumed by any component — later
+   phases will reference these vars as pages get redesigned.
+
+   Loaded once, from index.js, before App.css.
+   ============================================================================ */
+
+:root {
+  /* ── Spacing scale (4px grid) ── */
+  --cv-space-1: 4px;
+  --cv-space-2: 8px;
+  --cv-space-3: 12px;
+  --cv-space-4: 16px;
+  --cv-space-5: 20px;
+  --cv-space-6: 24px;
+  --cv-space-8: 32px;
+  --cv-space-10: 40px;
+  --cv-space-12: 48px;
+
+  /* ── Typography scale — keeps the existing system font stack (App.css/index.css) ── */
+  --cv-font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue', sans-serif;
+  --cv-font-xs: 11px;
+  --cv-font-sm: 12px;
+  --cv-font-base: 14px;
+  --cv-font-md: 15px;
+  --cv-font-lg: 16px;
+  --cv-font-xl: 20px;
+  --cv-font-2xl: 24px;
+  --cv-font-3xl: 32px;
+
+  /* ── Border radius scale ── */
+  --cv-radius-sm: 6px;
+  --cv-radius-md: 8px;
+  --cv-radius-lg: 12px;
+  --cv-radius-xl: 16px;
+  --cv-radius-full: 9999px;
+
+  /* ── Shadow scale (formalizes the ad hoc boxShadow values already used) ── */
+  --cv-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --cv-shadow-md: 0 4px 12px rgba(15, 23, 42, 0.10);
+  --cv-shadow-lg: 0 12px 32px rgba(15, 23, 42, 0.16);
+
+  /* ── Neutral palette — the slate scale already used as hardcoded hex
+     literals throughout the app, now available as named tokens ── */
+  --cv-gray-50: #f8fafc;
+  --cv-gray-100: #f1f5f9;
+  --cv-gray-200: #e2e8f0;
+  --cv-gray-300: #cbd5e1;
+  --cv-gray-400: #94a3b8;
+  --cv-gray-500: #64748b;
+  --cv-gray-600: #475569;
+  --cv-gray-700: #334155;
+  --cv-gray-800: #1e293b;
+  --cv-gray-900: #0f172a;
+
+  /* ── Semantic surface tokens — light mode defaults.
+     Dark mode overrides live in the body.dark-mode block below, matching
+     the app's real, dominant dark-mode mechanism (App.js toggles
+     `dark-mode` on document.body). The independent dark-mode class scopes
+     on the pre-login Home/Auth pages are intentionally left alone in
+     Phase 1 — they'll adopt these tokens when those pages are redesigned. ── */
+  --cv-bg: var(--cv-gray-50);
+  --cv-surface: #ffffff;
+  --cv-surface-alt: var(--cv-gray-100);
+  --cv-border: var(--cv-gray-200);
+  --cv-text: #111827;
+  --cv-text-secondary: var(--cv-gray-500);
+  --cv-text-muted: var(--cv-gray-400);
+}
+
+body.dark-mode {
+  --cv-bg: var(--cv-gray-900);
+  --cv-surface: var(--cv-gray-800);
+  --cv-surface-alt: #0f172a;
+  --cv-border: var(--cv-gray-700);
+  --cv-text: var(--cv-gray-100);
+  --cv-text-secondary: var(--cv-gray-400);
+  --cv-text-muted: var(--cv-gray-500);
+}

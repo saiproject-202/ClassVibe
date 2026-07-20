@@ -465,7 +465,8 @@ const styles = {
   notificationTitle: {
     fontSize: '15px',
     fontWeight: '600',
-    color: '#075E54'
+    color: '#075E54',
+    wordBreak: 'break-word'
   },
   notificationTime: {
     fontSize: '11px',
@@ -476,7 +477,8 @@ const styles = {
     fontSize: '13px',
     color: '#333',
     lineHeight: 1.4,
-    marginBottom: '4px'
+    marginBottom: '4px',
+    wordBreak: 'break-word'
   },
   notificationGroup: {
     fontSize: '12px',

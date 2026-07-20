@@ -1,0 +1,23 @@
+/* ============================================================================
+   LAYOUT (Phase 2) — the few things that genuinely need real CSS rather than
+   inline styles + useBreakpoint(). Most responsive logic stays JS-driven
+   (see DashboardNav.jsx / BottomNav.jsx) to match the app's existing
+   inline-style pattern from Phase 1's findings — this file is intentionally
+   minimal.
+   ============================================================================ */
+
+/* Safe-area padding for BottomNav so its content isn't obscured by the home
+   indicator / gesture bar on notched phones (iPhone X+ and similar). */
+.cv-bottom-nav-safe-area {
+  padding-bottom: calc(6px + env(safe-area-inset-bottom));
+}
+
+/* DashboardNav logout button hover — shared between teacher/student now that
+   both use the same component (previously only the teacher sidebar had a
+   .teacher-logout-btn:hover rule in App.css; student's had none). */
+.cv-nav-logout-btn:hover {
+  background-color: #FEE2E2 !important;
+  border-color: #EF4444 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.2);
+}

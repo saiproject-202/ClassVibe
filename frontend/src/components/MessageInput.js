@@ -21,7 +21,9 @@ const MessageInput = ({
   isAdmin        = false,
   members        = [],
   moderatedChat  = false,
-  adminId        = null
+  adminId        = null,
+  replyTarget    = null,   // { user, ts } — set by ChatArea's "↩ Reply" button
+  onReplyTargetConsumed
 }) => {
   const [message,           setMessage]           = useState('');
   const [showFileMenu,      setShowFileMenu]      = useState(false);
@@ -175,6 +177,16 @@ const MessageInput = ({
   useEffect(() => {
     return () => { if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current); };
   }, []);
+
+  // ── Reply button (ChatArea) — selects that student as the recipient ────────
+  useEffect(() => {
+    if (!replyTarget?.user) return;
+    setSelectedRecipients([replyTarget.user]);
+    setShowRecipients(false);
+    inputRef.current?.focus();
+    if (typeof onReplyTargetConsumed === 'function') onReplyTargetConsumed();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyTarget]);
 
   // ── Placeholder text ──────────────────────────────────────────────────────
   const placeholder = uploading

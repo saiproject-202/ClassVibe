@@ -23,10 +23,12 @@ const ChatArea = ({
   onMessageEdited,
   onMessageDeleted,
   userRole,
-  moderatedChat = false,
-  isAdmin       = false,
+  moderatedChat     = false,
+  isAdmin           = false,
+  onReplyToStudent,
 }) => {
   const [teacherFilter, setTeacherFilter] = useState('all'); // 'all' | 'unread' | a studentId
+  const [studentSearch, setStudentSearch] = useState(''); // filters the filter-chip list, not messages
   const messagesEndRef       = useRef(null);
   const messagesContainerRef = useRef(null);
 
@@ -116,6 +118,17 @@ const ChatArea = ({
   }, [onMessageEdited, onMessageDeleted, editingMessageId]);
 
   useEffect(() => { scrollToBottom(); }, [messages]);
+
+  // ── Teacher Moderated Chat: mark student messages as read while the teacher
+  // has the chat open. Server replies with 'messagesSeen' to both this socket
+  // (so the Unread badge/filter updates locally) and each sender's room (so
+  // students see "Seen by Teacher").
+  useEffect(() => {
+    if (!isAdmin || !moderatedChat || !currentGroup) return;
+    const groupId = currentGroup._id ?? currentGroup.id;
+    if (!groupId) return;
+    socket.emit('markMessagesRead', { groupId });
+  }, [isAdmin, moderatedChat, currentGroup, messages]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   const handleScroll = () => {
@@ -318,6 +331,10 @@ const ChatArea = ({
 
   // Teacher Moderated Chat — quick filters (All / Unread / per-student), reusing
   // the existing Message.readBy field. Applied on top of the search filter above.
+  const isUnreadForTeacher = (m) =>
+    m.sender && m.sender._id !== currentUserId &&
+    !(m.readBy || []).some(r => (r.user?._id || r.user) === currentUserId);
+
   const moderatedStudents = useMemo(() => {
     if (!isAdmin || !moderatedChat) return [];
     const seen = new Map();
@@ -329,18 +346,39 @@ const ChatArea = ({
     return [...seen.values()];
   }, [messages, isAdmin, moderatedChat, currentUserId]);
 
+  // Counts shown on each chip — computed off `searched` so they stay
+  // consistent with what clicking the chip actually reveals.
+  const filterCounts = useMemo(() => {
+    if (!isAdmin || !moderatedChat) return { all: 0, unread: 0, perStudent: {} };
+    const perStudent = {};
+    moderatedStudents.forEach(s => { perStudent[s._id] = 0; });
+    let unread = 0;
+    searched.forEach(m => {
+      if (isUnreadForTeacher(m)) {
+        unread++;
+        if (perStudent[m.sender._id] !== undefined) perStudent[m.sender._id]++;
+      }
+    });
+    return { all: searched.length, unread, perStudent };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searched, isAdmin, moderatedChat, moderatedStudents, currentUserId]);
+
+  const visibleModeratedStudents = useMemo(() => {
+    if (!studentSearch.trim()) return moderatedStudents;
+    const q = studentSearch.trim().toLowerCase();
+    return moderatedStudents.filter(s =>
+      (s.name || '').toLowerCase().includes(q) || (s.username || '').toLowerCase().includes(q)
+    );
+  }, [moderatedStudents, studentSearch]);
+
   const filtered = useMemo(() => {
     if (!isAdmin || !moderatedChat || teacherFilter === 'all') return searched;
-    if (teacherFilter === 'unread') {
-      return searched.filter(m =>
-        m.sender && m.sender._id !== currentUserId &&
-        !(m.readBy || []).some(r => (r.user?._id || r.user) === currentUserId)
-      );
-    }
+    if (teacherFilter === 'unread') return searched.filter(isUnreadForTeacher);
     // Per-student: that student's own messages plus anything addressed to them
     return searched.filter(m =>
       m.sender?._id === teacherFilter || m.recipient?._id === teacherFilter
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searched, isAdmin, moderatedChat, teacherFilter, currentUserId]);
 
   // ════════════════════════════════════════════════════════════════════════
@@ -424,6 +462,18 @@ const ChatArea = ({
     return null;
   };
 
+  // Teacher Moderated Chat — student-facing delivery status for their own
+  // private messages. `seenByTeacher` is a client-only flag set from the
+  // 'messagesSeen' socket event (App.js); `readBy` covers the case where the
+  // message was already read before this client loaded history.
+  const deliveryStatus = (message) => {
+    if (isAdmin || !moderatedChat || !message.recipient) return null;
+    const teacherId = currentGroup?.admin?._id || currentGroup?.admin;
+    const seen = message.seenByTeacher ||
+      (message.readBy || []).some(r => (r.user?._id || r.user) === teacherId);
+    return seen ? '✓✓ Seen by Teacher' : '✓ Sent to Teacher';
+  };
+
   const renderMeta = (message) => {
     const isTeacher = message.sender?.role === 'teacher';
     const name      = message.sender?.name || message.sender?.username || 'Unknown';
@@ -482,15 +532,35 @@ const ChatArea = ({
 
       {/* ── Teacher Moderated Chat: quick filters ── */}
       {moderatedChat && isAdmin && (
-        <div style={{ ...S.modFilterRow, backgroundColor: isDark?'#0f172a':'#f8fafc', borderBottom: isDark?'1px solid #334155':'1px solid #e2e8f0' }}>
-          <span style={{ ...S.modFilterLabel, color: isDark?'#94a3b8':'#64748b' }}>🛡 Moderated:</span>
-          <button onClick={() => setTeacherFilter('all')} style={{ ...S.modFilterChip, ...(teacherFilter==='all'?S.modFilterChipActive:{}) }}>All</button>
-          <button onClick={() => setTeacherFilter('unread')} style={{ ...S.modFilterChip, ...(teacherFilter==='unread'?S.modFilterChipActive:{}) }}>Unread</button>
-          {moderatedStudents.map(s => (
-            <button key={s._id} onClick={() => setTeacherFilter(s._id)} style={{ ...S.modFilterChip, ...(teacherFilter===s._id?S.modFilterChipActive:{}) }}>
-              {s.name || s.username}
+        <div style={{ backgroundColor: isDark?'#0f172a':'#f8fafc', borderBottom: isDark?'1px solid #334155':'1px solid #e2e8f0' }}>
+          {moderatedStudents.length > 5 && (
+            <div style={S.modSearchRow}>
+              <input
+                type="text"
+                value={studentSearch}
+                onChange={e => setStudentSearch(e.target.value)}
+                placeholder="🔍 Search student..."
+                style={{ ...S.modSearchInput, backgroundColor: isDark?'#1e293b':'#ffffff', color: isDark?'#e2e8f0':'#1e293b', borderColor: isDark?'#334155':'#e2e8f0' }}
+              />
+            </div>
+          )}
+          <div style={S.modFilterRow}>
+            <span style={{ ...S.modFilterLabel, color: isDark?'#94a3b8':'#64748b' }}>🛡 Moderated:</span>
+            <button onClick={() => setTeacherFilter('all')} style={{ ...S.modFilterChip, ...(teacherFilter==='all'?S.modFilterChipActive:{}) }}>
+              All <span style={S.modFilterCount}>({filterCounts.all})</span>
             </button>
-          ))}
+            <button onClick={() => setTeacherFilter('unread')} style={{ ...S.modFilterChip, ...(teacherFilter==='unread'?S.modFilterChipActive:{}) }}>
+              Unread <span style={S.modFilterCount}>({filterCounts.unread})</span>
+            </button>
+            {visibleModeratedStudents.map(s => (
+              <button key={s._id} onClick={() => setTeacherFilter(s._id)} style={{ ...S.modFilterChip, ...(teacherFilter===s._id?S.modFilterChipActive:{}) }}>
+                {s.name || s.username} <span style={S.modFilterCount}>({filterCounts.perStudent[s._id] || 0})</span>
+              </button>
+            ))}
+            {studentSearch.trim() && visibleModeratedStudents.length === 0 && (
+              <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>No students match "{studentSearch}"</span>
+            )}
+          </div>
         </div>
       )}
 
@@ -545,7 +615,9 @@ const ChatArea = ({
                           {recipientLabel(message) && <span style={S.recipientBadge}>{recipientLabel(message)}</span>}
                           {message.isEdited && !message.isDeleted && <span style={{ fontSize: 10, color: '#94a3b8', fontStyle: 'italic' }}>(edited)</span>}
                           <span style={S.ownTime}>{formatTime(message.createdAt)}</span>
-                          <span style={{ ...S.readTick, color: ownBubbleColor.tick }}>✓✓</span>
+                          {deliveryStatus(message)
+                            ? <span style={S.deliveryStatus}>{deliveryStatus(message)}</span>
+                            : <span style={{ ...S.readTick, color: ownBubbleColor.tick }}>✓✓</span>}
                         </div>
                       )}
                     </div>
@@ -572,6 +644,9 @@ const ChatArea = ({
                       <div style={{ ...S.bubble, backgroundColor: message.isDeleted ? (isDark?'#1e293b':'#f1f5f9') : (isDark?'#1e3a5f':'#ffffff'), borderColor: isDark?'#334155':'#e2e8f0', borderRadius: '3px 12px 12px 12px', opacity: message.isDeleted ? 0.65 : 1 }}>
                         {editing ? renderEditUI() : renderContent(message)}
                       </div>
+                      {isAdmin && moderatedChat && message.sender && !message.isDeleted && typeof onReplyToStudent === 'function' && (
+                        <button onClick={() => onReplyToStudent(message.sender)} style={S.replyBtn}>↩ Reply</button>
+                      )}
                     </div>
                   </div>
                 )}
@@ -740,10 +815,15 @@ const S = {
 
   // ── Teacher Moderated Chat ──
   modNotice:    { padding: '8px 16px', fontSize: 12, fontWeight: '600', textAlign: 'center' },
+  modSearchRow: { padding: '8px 16px 0' },
+  modSearchInput: { width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid', borderRadius: 8, outline: 'none', boxSizing: 'border-box' },
   modFilterRow: { display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', overflowX: 'auto', flexWrap: 'wrap' },
   modFilterLabel: { fontSize: 12, fontWeight: '700', flexShrink: 0 },
   modFilterChip: { padding: '4px 11px', fontSize: 12, fontWeight: '600', border: '1px solid #e2e8f0', borderRadius: 20, cursor: 'pointer', backgroundColor: 'transparent', color: '#64748b', whiteSpace: 'nowrap', flexShrink: 0 },
   modFilterChipActive: { backgroundColor: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' },
+  modFilterCount: { opacity: 0.7, fontWeight: '500' },
+  replyBtn:     { alignSelf: 'flex-start', marginTop: 3, padding: '2px 10px', fontSize: 11, fontWeight: '600', color: '#4f46e5', backgroundColor: 'transparent', border: '1px solid #c7d2fe', borderRadius: 12, cursor: 'pointer' },
+  deliveryStatus: { fontSize: 10, color: '#94a3b8', fontWeight: '500' },
 
   msgContainer: { flex: 1, overflowY: 'auto', padding: '20px 20px', display: 'flex', flexDirection: 'column', gap: 2 },
   empty:        { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%' },

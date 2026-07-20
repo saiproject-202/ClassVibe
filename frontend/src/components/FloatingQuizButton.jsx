@@ -4,6 +4,7 @@
 // Student: opens the Lobby (team pick if needed, then the live quiz)
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useBreakpoint } from '../styles/breakpoints';
 
 const API = process.env.REACT_APP_API_URL || 'https://classvibe-backend.onrender.com';
 
@@ -26,6 +27,11 @@ const FloatingQuizButton = ({
   const dragOffset = useRef({ x: 0, y: 0 });
   const buttonRef = useRef(null);
   const moved = useRef(false); // distinguish drag from click
+
+  // Design System (Phase 2) — keep the button from being dragged under the
+  // new mobile BottomNav bar.
+  const bucket = useBreakpoint();
+  const bottomReserve = bucket === 'mobile' ? 70 : 0;
 
   // ── Fetch active quiz ─────────────────────────────────────────────
   const checkActiveQuiz = useCallback(async () => {
@@ -154,7 +160,7 @@ const FloatingQuizButton = ({
       moved.current = true;
       const SIZE = 96;
       const newX = Math.max(0, Math.min(window.innerWidth - SIZE, e.clientX - dragOffset.current.x));
-      const newY = Math.max(0, Math.min(window.innerHeight - SIZE, e.clientY - dragOffset.current.y));
+      const newY = Math.max(0, Math.min(window.innerHeight - SIZE - bottomReserve, e.clientY - dragOffset.current.y));
       setPos({ x: newX, y: newY });
     };
 
@@ -166,7 +172,7 @@ const FloatingQuizButton = ({
       window.removeEventListener('mousemove', onMouseMove);
       window.removeEventListener('mouseup', onMouseUp);
     };
-  }, []);
+  }, [bottomReserve]);
 
   // ── Touch drag support ────────────────────────────────────────────
   const onTouchStart = (e) => {
@@ -182,7 +188,7 @@ const FloatingQuizButton = ({
     const touch = e.touches[0];
     const SIZE = 96;
     const newX = Math.max(0, Math.min(window.innerWidth - SIZE, touch.clientX - dragOffset.current.x));
-    const newY = Math.max(0, Math.min(window.innerHeight - SIZE, touch.clientY - dragOffset.current.y));
+    const newY = Math.max(0, Math.min(window.innerHeight - SIZE - bottomReserve, touch.clientY - dragOffset.current.y));
     setPos({ x: newX, y: newY });
     e.preventDefault();
   };

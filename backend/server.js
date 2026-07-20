@@ -1888,6 +1888,47 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Teacher Moderated Chat — read receipts. Teacher-only; marks every
+  // currently-unread private student message as read and tells both the
+  // teacher (so their own Unread badge/filter updates) and each sender
+  // (so their bubble flips from "Sent" to "Seen by Teacher").
+  socket.on('markMessagesRead', async (data) => {
+    try {
+      if (!socket.userId) return;
+      const { groupId } = data || {};
+      const group = await Group.findById(groupId);
+      if (!group || !group.isAdmin(socket.userId)) return;
+
+      const unread = await Message.find({
+        group: groupId,
+        recipient: socket.userId,
+        sender: { $ne: socket.userId },
+        'readBy.user': { $ne: socket.userId }
+      }).select('_id sender');
+
+      if (unread.length === 0) return;
+
+      const ids = unread.map(m => m._id);
+      await Message.updateMany(
+        { _id: { $in: ids } },
+        { $push: { readBy: { user: socket.userId, readAt: new Date() } } }
+      );
+
+      const bySender = {};
+      unread.forEach(m => {
+        const sid = m.sender.toString();
+        (bySender[sid] = bySender[sid] || []).push(m._id.toString());
+      });
+      Object.entries(bySender).forEach(([senderId, messageIds]) => {
+        io.to(senderId).emit('messagesSeen', { messageIds });
+      });
+      socket.emit('messagesSeen', { messageIds: ids.map(id => id.toString()) });
+
+    } catch (error) {
+      console.error('Mark messages read error:', error);
+    }
+  });
+
     // ⭐ NEW: POLL VOTING
     socket.on('votePoll', async (data) => {
       try {

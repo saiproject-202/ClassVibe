@@ -447,6 +447,7 @@ const styles = {
   badges: {
     display: 'flex',
     justifyContent: 'center',
+    flexWrap: 'wrap',
     gap: '30px',
     marginTop: '20px'
   },

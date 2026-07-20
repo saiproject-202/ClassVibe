@@ -20,6 +20,7 @@
 //   3. All existing props/logic/styles UNCHANGED
 
 import React, { useState, useEffect } from "react";
+import { useBreakpoint } from '../styles/breakpoints';
 import NotificationBell from './NotificationBell';
 
 const Header = ({
@@ -80,6 +81,7 @@ const Header = ({
   }, [sessionStartedAt]);
 
   const isTeacher = userRole === 'teacher';
+  const bucket = useBreakpoint(); // Design System (Phase 2)
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   const getInitials = (name) => (name || '??').substring(0, 2).toUpperCase();
@@ -172,8 +174,10 @@ const Header = ({
 
             {/* Bell — always shown outside session */}
             {!groupName && socket && <NotificationBell socket={socket} />}
-            {/* Hamburger — outside session only for teachers (students have their own sidebar nav) */}
-            {!groupName && userRole !== 'student' && (
+            {/* Hamburger — outside session, always for teachers; for students only on
+                mobile (Design System Phase 2), since desktop/tablet students still
+                navigate via DashboardNav, not this drawer. */}
+            {!groupName && (userRole !== 'student' || bucket === 'mobile') && (
               <button
                 onClick={onToggleSidebar}
                 style={S.hamburgerBtn}

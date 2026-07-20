@@ -2,8 +2,10 @@
 // Complete Quiz Creator with Undo/Redo, Multiple Question Types, Timer Editing
 
 import React, { useState, useEffect, useRef } from 'react';
+import { useBreakpoint } from '../styles/breakpoints';
 
 const QuizCreator = ({ groupId, onClose, onSuccess }) => {
+  const bucket = useBreakpoint(); // Design System (Phase 3)
   // Navigation steps
   const [currentStep, setCurrentStep] = useState('essentials');
   
@@ -1038,7 +1040,7 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
 
           {/* STEP 2: QUESTIONS */}
           {currentStep === 'questions' && (
-            <div style={styles.questionsContainer}>
+            <div style={{ ...styles.questionsContainer, ...(bucket === 'mobile' ? { gridTemplateColumns: '1fr', height: 'auto' } : {}) }}>
               {/* Left Panel: Question Bank */}
               <div style={styles.questionBank}>
                 <div style={styles.questionBankHeader}>
@@ -1351,7 +1353,9 @@ const styles = {
     display: 'flex',
     borderBottom: '2px solid #f0f0f0',
     backgroundColor: '#fafafa',
-    padding: '0 32px'
+    padding: '0 32px',
+    overflowX: 'auto',
+    flexWrap: 'nowrap'
   },
   tab: {
     padding: '16px 32px',
@@ -1365,7 +1369,9 @@ const styles = {
     transition: 'all 0.2s',
     display: 'flex',
     alignItems: 'center',
-    gap: '8px'
+    gap: '8px',
+    whiteSpace: 'nowrap',
+    flexShrink: 0
   },
   tabActive: {
     color: 'var(--cv-accent)',

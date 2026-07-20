@@ -11,6 +11,9 @@ import socket from './socket';
 import Home from './pages/Home';
 import AuthScreen from './pages/AuthScreen';
 import Header from './components/Header';
+import DashboardNav from './components/DashboardNav';
+import BottomNav from './components/BottomNav';
+import { useBreakpoint } from './styles/breakpoints';
 import Sidebar, { Settings as AccountSettings } from './components/Sidebar';
 import ChatArea from './components/ChatArea';
 import MessageInput from './components/MessageInput';
@@ -50,7 +53,7 @@ const resolveIsDark = (mode) =>
   mode === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : mode === 'dark';
 
 // ── INSTRUCTOR HUB STYLES (theme-aware) ──
-function getD(dk) {
+function getD(dk, bucket) {
   const bg    = dk ? '#0f172a' : '#f9fafb';
   const surf  = dk ? '#1e293b' : 'white';
   const bdr   = dk ? '#334155' : '#e5e7eb';
@@ -81,20 +84,20 @@ function getD(dk) {
   analyticsCardTitle:{ fontSize:'15px', fontWeight:'700', color:txt, marginBottom:3 },
   analyticsCardSub:{ fontSize:'11px', color:txt3, marginBottom:4 },
   analyticsEmpty:{ textAlign:'center', padding:'60px 16px', color:txt3, fontSize:13 },
-  main:{ flex:1, overflowY:'auto', padding:'28px', backgroundColor:bg },
+  main:{ flex:1, overflowY:'auto', padding: bucket === 'mobile' ? '16px 16px 76px' : '28px', backgroundColor:bg },
   topBar:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'24px' },
   pageTitle:{ fontSize:'24px', fontWeight:'800', color:txt },
   topActions:{ display:'flex', gap:'10px' },
   planBtn:{ padding:'10px 18px', border:`1.5px solid ${bdr}`, borderRadius:'8px', background:btn, fontSize:'14px', fontWeight:'600', color:btnTxt, cursor:'pointer' },
   createBtn:{ padding:'10px 18px', border:'none', borderRadius:'8px', backgroundColor:'var(--cv-accent)', color:'white', fontSize:'14px', fontWeight:'700', cursor:'pointer' },
-  statsRow:{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px', marginBottom:'28px' },
+  statsRow:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:'16px', marginBottom:'28px' },
   statCard:{ backgroundColor:surf, borderRadius:'12px', padding:'20px', border:`1px solid ${bdr}`, position:'relative', overflow:'hidden' },
   statIcon:{ fontSize:'24px', marginBottom:'8px' },
   statTrend:{ position:'absolute', top:16, right:16, fontSize:'12px', fontWeight:'600', color:'#10B981' },
   statLabel:{ fontSize:'13px', color:txt2, fontWeight:'500', marginBottom:'4px' },
   statValue:{ fontSize:'28px', fontWeight:'800', color:txt },
   statSub:{ fontSize:'12px', color:txt3, marginTop:'2px' },
-  contentRow:{ display:'flex', gap:'24px', alignItems:'flex-start' },
+  contentRow:{ display:'flex', flexDirection: bucket === 'mobile' ? 'column' : 'row', gap:'24px', alignItems: bucket === 'mobile' ? 'stretch' : 'flex-start' },
   sessionsCol:{ flex:1, minWidth:0 },
   sectionBar:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'16px' },
   sectionTitle:{ fontSize:'18px', fontWeight:'700', color:txt },
@@ -122,7 +125,7 @@ function getD(dk) {
   emptyIcon:{ fontSize:'48px', marginBottom:'12px' },
   emptyTitle:{ fontSize:'18px', fontWeight:'600', color:txt2, marginBottom:'8px' },
   emptyText:{ fontSize:'14px', color:txt2, marginBottom:'16px' },
-  rightCol:{ width:280, flexShrink:0 },
+  rightCol:{ width: bucket === 'mobile' ? '100%' : 280, flexShrink:0 },
   rightTitle:{ fontSize:'15px', fontWeight:'700', color:txt, marginBottom:'12px' },
   toolCard:{ display:'flex', alignItems:'center', gap:'12px', padding:'14px', backgroundColor:surf, borderRadius:'10px', border:`1px solid ${bdr}`, marginBottom:'10px', cursor:'pointer' },
   toolIconBox:{ fontSize:'18px', width:36, height:36, backgroundColor:inv, borderRadius:'8px', display:'flex', alignItems:'center', justifyContent:'center' },
@@ -199,7 +202,7 @@ function getM(dk) {
 }
 
 // ── STUDENT HUB STYLES (theme-aware) ──
-function getSD(dk) {
+function getSD(dk, bucket) {
   const bg   = dk ? '#0f172a' : '#f9fafb';
   const surf = dk ? '#1e293b' : 'white';
   const bdr  = dk ? '#334155' : '#e5e7eb';
@@ -226,12 +229,12 @@ function getSD(dk) {
   userRole:{ fontSize:'11px', color:txt3 },
   themeToggleBtn:{ margin:'4px 10px', padding:'8px 12px', border:`1px solid ${bdr}`, borderRadius:'8px', background:surf, fontSize:'12px', fontWeight:'600', color:txt2, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6, whiteSpace:'nowrap', overflow:'hidden', transition:'all 0.18s ease' },
   logoutBtn:{ margin:'6px 10px 10px', padding:'10px 12px', border:'1.5px solid #FCA5A5', borderRadius:'10px', background:'#FEF2F2', fontSize:'12px', fontWeight:'700', color:'#DC2626', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:6, whiteSpace:'nowrap', overflow:'hidden', transition:'all 0.18s ease' },
-  main:{ flex:1, overflowY:'auto', padding:'28px', minWidth:0, backgroundColor:bg },
+  main:{ flex:1, overflowY:'auto', padding: bucket === 'mobile' ? '16px 16px 76px' : '28px', minWidth:0, backgroundColor:bg },
   topBar:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'20px', flexWrap:'wrap', gap:8 },
   pageTitle:{ fontSize:'24px', fontWeight:'800', color:txt, margin:0 },
   pageSubtitle:{ fontSize:'13px', color:txt2, marginTop:'4px' },
   refreshBtn:{ padding:'7px 14px', fontSize:'12px', fontWeight:'600', border:`1.5px solid ${bdr}`, borderRadius:'7px', background:btn, color:btnTxt, cursor:'pointer' },
-  statsRow:{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'12px', marginBottom:'20px' },
+  statsRow:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(130px, 1fr))', gap:'12px', marginBottom:'20px' },
   statCard:{ backgroundColor:surf, borderRadius:'12px', padding:'14px 16px', border:`1px solid ${bdr}`, display:'flex', alignItems:'center', gap:'12px', boxShadow:`0 1px 3px rgba(0,0,0,${dk?0.3:0.04})` },
   statIconBox:{ width:40, height:40, borderRadius:'10px', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'18px', flexShrink:0 },
   statLabel:{ fontSize:'10px', fontWeight:'700', color:txt3, letterSpacing:'0.8px', marginBottom:'2px' },
@@ -242,9 +245,9 @@ function getSD(dk) {
   activeBannerTitle:{ fontSize:'14px', fontWeight:'700', color:dk?'#a5b4fc':'#3730a3' },
   activeBannerSub:{ fontSize:'12px', color:'#818cf8', marginTop:2 },
   activeBannerBtn:{ padding:'8px 18px', backgroundColor:'var(--cv-accent)', color:'white', border:'none', borderRadius:'8px', fontSize:'13px', fontWeight:'700', cursor:'pointer', flexShrink:0 },
-  contentRow:{ display:'flex', gap:'20px', alignItems:'flex-start' },
+  contentRow:{ display:'flex', flexDirection: bucket === 'mobile' ? 'column' : 'row', gap:'20px', alignItems: bucket === 'mobile' ? 'stretch' : 'flex-start' },
   mainCol:{ flex:1, minWidth:0 },
-  rightCol:{ width:240, flexShrink:0 },
+  rightCol:{ width: bucket === 'mobile' ? '100%' : 240, flexShrink:0 },
   joinCard:{ backgroundColor:surf, borderRadius:'14px', padding:'20px 22px', border:`1.5px solid ${bdr}`, marginBottom:'20px', boxShadow:'0 2px 8px rgba(99,102,241,0.07)', maxWidth:'360px' },
   joinTabRow:{ display:'flex', gap:'6px', marginBottom:'14px', backgroundColor:dk?infoBg:'#f3f4f6', borderRadius:'8px', padding:'3px' },
   joinTabBtn:(active)=>({ flex:1, padding:'7px 8px', borderRadius:'6px', border:'none', fontSize:'12px', fontWeight:'700', cursor:'pointer', backgroundColor:active?(dk?surf:'white'):'transparent', color:active?txt:txt3, boxShadow:active?'0 1px 3px rgba(0,0,0,0.08)':'none', transition:'all 0.15s' }),
@@ -321,6 +324,23 @@ function getSD(dk) {
   }; // end getSD
 }
 
+// Design System (Phase 2) — shared nav item lists for DashboardNav/BottomNav,
+// module-level since they're static data, not derived from any component state.
+const TEACHER_NAV_ITEMS = [
+  { icon:'📊', label:'Dashboard',    view:'dashboard' },
+  { icon:'📅', label:'Schedule',     view:'schedule' },
+  { icon:'📖', label:'Quiz History', view:'quizhistory' },
+  { icon:'📈', label:'Analytics',    view:'analytics' },
+  { icon:'⚙️', label:'Settings',     view:'settings' },
+];
+const STUDENT_NAV_ITEMS = [
+  { icon:'📊', label:'Dashboard',    view:'dashboard' },
+  { icon:'📅', label:'Schedule',     view:'schedule' },
+  { icon:'📝', label:'Quizzes',      view:'quizzes' },
+  { icon:'📋', label:'Session List', view:'sessionlist' },
+  { icon:'⚙️', label:'Settings',     view:'settings' },
+];
+
 function App() {
   const [user, setUser] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -339,11 +359,13 @@ function App() {
   const [groups, setGroups] = useState([]);
   const [currentGroup, setCurrentGroup] = useState(null);
   const [messages, setMessages] = useState([]);
+  const [replyTarget, setReplyTarget] = useState(null); // Teacher Moderated Chat — Reply button target
   const [typingUsers, setTypingUsers] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [themeMode, setThemeModeState] = useState(getStoredThemeMode);
   const [isDark, setIsDark] = useState(() => resolveIsDark(getStoredThemeMode()));
+  const bucket = useBreakpoint(); // Design System (Phase 2) — 'mobile' | 'tablet' | 'laptop' | 'desktop'
 
   // Settings → Preferences → Appearance: explicit 'light' | 'dark' | 'system' choice.
   const setThemeMode = (mode) => {
@@ -681,6 +703,10 @@ function App() {
     socket.on('moderatedChatToggled', (data) => {
       setCurrentGroup(prev => (prev && (prev._id ?? prev.id) === data.groupId) ? { ...prev, moderatedChat: data.moderatedChat } : prev);
     });
+    socket.on('messagesSeen', (data) => {
+      const ids = new Set(data.messageIds || []);
+      setMessages(prev => prev.map(m => ids.has(m._id) ? { ...m, seenByTeacher: true } : m));
+    });
     socket.on('sessionEnded', () => { alert('The admin has ended this session'); loadGroups(false); setCurrentGroup(null); setMessages([]); });
     socket.on('messageEdited', (msg) => setMessages(prev => prev.map(m => m._id === msg._id ? msg : m)));
     socket.on('messageDeleted', (data) => setMessages(prev => prev.map(m => m._id === data.messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m)));
@@ -689,7 +715,7 @@ function App() {
     socket.on('quizEnded', (data) => { console.log('🏁 Quiz ended:', data); alert('Quiz has ended! Check your results.'); });
     socket.on('leaderboardUpdate', (data) => console.log('📊 Leaderboard updated:', data));
     return () => {
-      ['newMessage','userJoined','userTyping','userStopTyping','onlineUsersUpdate','moderatedChatToggled','sessionEnded',
+      ['newMessage','userJoined','userTyping','userStopTyping','onlineUsersUpdate','moderatedChatToggled','messagesSeen','sessionEnded',
        'messageEdited','messageDeleted','quizStarted','nextQuestion','quizEnded','leaderboardUpdate']
        .forEach(e => socket.off(e));
     };
@@ -1235,8 +1261,8 @@ function App() {
   }, [detailsGroup]);
 
   // ── Theme-aware style objects (recomputed whenever isDark changes) ──
-  const D = getD(isDark);
-  const SD = getSD(isDark);
+  const D = getD(isDark, bucket);
+  const SD = getSD(isDark, bucket);
   const M = getM(isDark);
 
   // ─────────────────────────────────────────
@@ -1594,50 +1620,19 @@ function App() {
             /* ── INSTRUCTOR HUB ── */
             <div style={D.shell} ref={menuRef}>
 
-              {/* COLLAPSIBLE LEFT SIDEBAR */}
-              <div style={{ ...D.sidebar, width: teacherSidebarOpen ? 220 : 60, transition:'width 0.22s ease', overflow:'hidden' }}>
-                {/* Logo toggle */}
-                <button style={D.logoToggleBtn} onClick={() => setTeacherSidebarOpen(v => !v)} title={teacherSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}>
-                  <span style={{ fontSize:20, flexShrink:0 }}>🎓</span>
-                  {teacherSidebarOpen && <span style={D.sidebarLogoText}>ClassVibe</span>}
-                </button>
-
-                {/* Nav items */}
-                {[
-                  { icon:'📊', label:'Dashboard',    view:'dashboard' },
-                  { icon:'📅', label:'Schedule',     view:'schedule' },
-                  { icon:'📖', label:'Quiz History', view:'quizhistory' },
-                  { icon:'📈', label:'Analytics',    view:'analytics' },
-                  { icon:'⚙️', label:'Settings',     view:'settings' },
-                ].map((item, i) => (
-                  <button key={i}
-                    title={!teacherSidebarOpen ? item.label : undefined}
-                    style={{ ...D.navItem, justifyContent: teacherSidebarOpen ? 'flex-start' : 'center', backgroundColor: teacherView === item.view ? 'var(--cv-accent-light)' : 'transparent', color: teacherView === item.view ? 'var(--cv-accent)' : '#6b7280', fontWeight: teacherView === item.view ? '700' : '500', whiteSpace:'nowrap' }}
-                    onClick={() => setTeacherView(item.view)}
-                  >
-                    <span style={D.navIcon}>{item.icon}</span>
-                    {teacherSidebarOpen && <span>{item.label}</span>}
-                  </button>
-                ))}
-
-                <div style={D.sidebarSpacer} />
-
-                {/* User info */}
-                {teacherSidebarOpen ? (
-                  <div style={D.sidebarUser}>
-                    <div style={D.userAvatar}>👨‍🏫</div>
-                    <div><div style={D.userName}>{displayName}</div><div style={D.userRole}>Admin Instructor</div></div>
-                  </div>
-                ) : (
-                  <div style={{ display:'flex', justifyContent:'center', padding:'8px 0' }}>
-                    <div style={{ ...D.userAvatar, cursor:'default' }} title={displayName}>👨‍🏫</div>
-                  </div>
-                )}
-
-                <button onClick={handleLogout} className="teacher-logout-btn" style={{ ...D.logoutBtn, margin: teacherSidebarOpen ? undefined : '4px 8px', whiteSpace:'nowrap' }}>
-                  {teacherSidebarOpen ? '→ Logout' : '🚪'}
-                </button>
-              </div>
+              {/* Navigation — DashboardNav (tablet+) / BottomNav (mobile), Design System Phase 2 */}
+              <DashboardNav
+                items={TEACHER_NAV_ITEMS}
+                activeView={teacherView}
+                onNavigate={setTeacherView}
+                isOpen={teacherSidebarOpen}
+                onToggle={() => setTeacherSidebarOpen(v => !v)}
+                displayName={displayName}
+                avatar="👨‍🏫"
+                roleLabel="Admin Instructor"
+                onLogout={handleLogout}
+              />
+              <BottomNav items={TEACHER_NAV_ITEMS} activeView={teacherView} onNavigate={setTeacherView} />
 
               {/* MAIN AREA */}
               <div style={D.main}>
@@ -2329,50 +2324,19 @@ function App() {
             /* ── STUDENT HUB ── */
             <div style={SD.shell}>
 
-              {/* LEFT SIDEBAR */}
-              <div style={{ ...SD.sidebar, width: sidebarCollapsed ? 64 : 220, transition:'width 0.22s ease' }}>
-                {/* Logo toggle — click anywhere on it to expand/collapse */}
-                <button style={SD.logoToggleBtn} onClick={() => setSidebarCollapsed(v => !v)} title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-                  <span style={{ fontSize:20, flexShrink:0 }}>🎓</span>
-                  {!sidebarCollapsed && <span style={SD.logoText}>ClassVibe</span>}
-                </button>
-
-                {/* Nav items */}
-                {[
-                  { icon:'📊', label:'Dashboard',    view:'dashboard' },
-                  { icon:'📅', label:'Schedule',     view:'schedule' },
-                  { icon:'📝', label:'Quizzes',      view:'quizzes' },
-                  { icon:'📋', label:'Session List', view:'sessionlist' },
-                  { icon:'⚙️', label:'Settings',     view:'settings' },
-                ].map((item, i) => (
-                  <button key={i}
-                    title={sidebarCollapsed ? item.label : undefined}
-                    style={{ ...SD.navItem, justifyContent: sidebarCollapsed ? 'center' : 'flex-start', backgroundColor: studentView === item.view ? 'var(--cv-accent-light)' : 'transparent', color: studentView === item.view ? 'var(--cv-accent)' : '#6b7280', fontWeight: studentView === item.view ? '700' : '500' }}
-                    onClick={() => setStudentView(item.view)}>
-                    <span style={SD.navIcon}>{item.icon}</span>
-                    {!sidebarCollapsed && <span>{item.label}</span>}
-                  </button>
-                ))}
-
-                <div style={SD.sidebarSpacer} />
-
-                {/* User info */}
-                {!sidebarCollapsed ? (
-                  <div style={SD.sidebarUser}>
-                    <div style={SD.userAvatar}>{displayName.charAt(0).toUpperCase()}</div>
-                    <div><div style={SD.userName}>{displayName}</div><div style={SD.userRole}>Student</div></div>
-                  </div>
-                ) : (
-                  <div style={{ display:'flex', justifyContent:'center', padding:'8px 0' }}>
-                    <div style={SD.userAvatar} title={displayName}>{displayName.charAt(0).toUpperCase()}</div>
-                  </div>
-                )}
-
-                {/* Logout */}
-                <button onClick={handleLogout} style={SD.logoutBtn} title={sidebarCollapsed ? 'Logout' : undefined}>
-                  {sidebarCollapsed ? '🚪' : '→ Logout'}
-                </button>
-              </div>
+              {/* Navigation — DashboardNav (tablet+) / BottomNav (mobile), Design System Phase 2 */}
+              <DashboardNav
+                items={STUDENT_NAV_ITEMS}
+                activeView={studentView}
+                onNavigate={setStudentView}
+                isOpen={!sidebarCollapsed}
+                onToggle={() => setSidebarCollapsed(v => !v)}
+                displayName={displayName}
+                avatar={displayName.charAt(0).toUpperCase()}
+                roleLabel="Student"
+                onLogout={handleLogout}
+              />
+              <BottomNav items={STUDENT_NAV_ITEMS} activeView={studentView} onNavigate={setStudentView} />
 
               {/* MAIN CONTENT */}
               <div style={SD.main}>
@@ -2914,8 +2878,8 @@ function App() {
         ) : (
           /* ── CHAT VIEW — IDENTICAL ── */
           <>
-            <ChatArea messages={messages} currentUserId={getUserId(user)} currentGroup={currentGroup} typingUsers={typingUsers} onMessageEdited={handleMessageEdited} onMessageDeleted={handleMessageDeleted} moderatedChat={!!currentGroup.moderatedChat} isAdmin={isAdmin} />
-            <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} onStopTyping={handleStopTyping} disabled={!currentGroup || !currentGroup.isActive} isAdmin={isAdmin} members={(currentGroup.members || []).map(m => m.user).filter(Boolean)} moderatedChat={!!currentGroup.moderatedChat} adminId={currentGroup.admin?._id} />
+            <ChatArea messages={messages} currentUserId={getUserId(user)} currentGroup={currentGroup} typingUsers={typingUsers} onMessageEdited={handleMessageEdited} onMessageDeleted={handleMessageDeleted} moderatedChat={!!currentGroup.moderatedChat} isAdmin={isAdmin} onReplyToStudent={(student) => setReplyTarget({ user: student, ts: Date.now() })} />
+            <MessageInput onSendMessage={handleSendMessage} onTyping={handleTyping} onStopTyping={handleStopTyping} disabled={!currentGroup || !currentGroup.isActive} isAdmin={isAdmin} members={(currentGroup.members || []).map(m => m.user).filter(Boolean)} moderatedChat={!!currentGroup.moderatedChat} adminId={currentGroup.admin?._id} replyTarget={replyTarget} onReplyTargetConsumed={() => setReplyTarget(null)} />
           </>
         )}
       </div>

@@ -16,6 +16,7 @@
 //  6. All existing socket/session logic UNCHANGED
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useBreakpoint } from '../styles/breakpoints';
 
 // ─── inline Settings component ──────────────────────────────────────────────
 export const Settings = ({ onClose, onUserUpdated, isDark }) => {
@@ -186,6 +187,7 @@ const COLORS = ['#000000','#ef4444','#f97316','#eab308','#22c55e','#3b82f6','#8b
 const SIZES  = [2, 5, 10, 18];
 
 const Whiteboard = ({ onClose }) => {
+  const bucket = useBreakpoint(); // Design System (Phase 3)
   const canvasRef    = useRef(null);
   const isDrawingRef = useRef(false);
   const lastPosRef   = useRef(null);
@@ -198,18 +200,30 @@ const Whiteboard = ({ onClose }) => {
   const [canUndo,  setCanUndo]  = useState(false);
   const [canRedo,  setCanRedo]  = useState(false);
 
-  // ── Init canvas ──
+  // ── Init canvas — re-runs on resize/orientation-change too, so the backing
+  // store stays matched to the displayed size instead of stretching/blurring.
+  // Debounced since resize fires continuously during a drag-resize. Redrawing
+  // existing strokes across a resize is out of scope (matches mount behavior).
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    canvas.width  = canvas.parentElement?.clientWidth  || window.innerWidth;
-    canvas.height = canvas.parentElement?.clientHeight || (window.innerHeight - 68);
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const snap = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    historyRef.current = [snap];
-    stepRef.current = 0;
+    const initCanvas = () => {
+      canvas.width  = canvas.parentElement?.clientWidth  || window.innerWidth;
+      canvas.height = canvas.parentElement?.clientHeight || (window.innerHeight - 68);
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      const snap = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      historyRef.current = [snap];
+      stepRef.current = 0;
+      setCanUndo(false);
+      setCanRedo(false);
+    };
+    initCanvas();
+    let resizeTimer;
+    const handleResize = () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(initCanvas, 150); };
+    window.addEventListener('resize', handleResize);
+    return () => { window.removeEventListener('resize', handleResize); clearTimeout(resizeTimer); };
   }, []);
 
   const saveSnap = useCallback(() => {
@@ -320,14 +334,16 @@ const Whiteboard = ({ onClose }) => {
           </button>
         ))}
 
-        <div style={WB.sep} />
+        {/* On mobile, force a clean row break here instead of an arbitrary wrap
+            point — row 1 is drawing tools, row 2 is actions. */}
+        {bucket === 'mobile' ? <div style={WB.rowBreak} /> : <div style={WB.sep} />}
 
         {/* Undo / Redo / Clear */}
         <button style={{ ...WB.actionBtn, opacity: canUndo ? 1 : 0.4 }} onClick={undo} disabled={!canUndo}>↩ Undo</button>
         <button style={{ ...WB.actionBtn, opacity: canRedo ? 1 : 0.4 }} onClick={redo} disabled={!canRedo}>↪ Redo</button>
         <button style={{ ...WB.actionBtn, color:'#ef4444' }} onClick={clear}>🗑 Clear</button>
 
-        <div style={{ flex: 1 }} />
+        {bucket !== 'mobile' && <div style={{ flex: 1 }} />}
         <button style={WB.closeBtn} onClick={onClose}>✕ Close</button>
       </div>
 
@@ -347,9 +363,13 @@ const Whiteboard = ({ onClose }) => {
 // Whiteboard styles
 const WB = {
   overlay:    { position:'fixed', inset:0, zIndex:3000, backgroundColor:'#f8fafc', display:'flex', flexDirection:'column' },
-  toolbar:    { display:'flex', alignItems:'center', gap:6, padding:'0 16px', height:56, backgroundColor:'#ffffff', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap', overflowX:'auto' },
+  // height (not fixed) — a fixed height clipped wrapped rows whenever the ~20
+  // controls didn't fit one line (not just on mobile — 768px tablet wraps
+  // too); minHeight keeps the original single-row look wherever it still fits.
+  toolbar:    { display:'flex', alignItems:'center', gap:6, padding:'8px 16px', minHeight:56, backgroundColor:'#ffffff', borderBottom:'1px solid #e2e8f0', flexShrink:0, flexWrap:'wrap', overflowX:'auto' },
   wbTitle:    { fontSize:14, fontWeight:'700', color:'#1e293b', marginRight:4, whiteSpace:'nowrap' },
   sep:        { width:1, height:28, backgroundColor:'#e2e8f0', flexShrink:0, margin:'0 4px' },
+  rowBreak:   { flexBasis:'100%', height:0 },
   toolBtn:    { padding:'5px 10px', fontSize:12, fontWeight:'600', backgroundColor:'transparent', color:'#475569', border:'1px solid #e2e8f0', borderRadius:6, cursor:'pointer', whiteSpace:'nowrap' },
   active:     { backgroundColor:'#eef2ff', color:'#4f46e5', borderColor:'#c7d2fe' },
   colorDot:   { width:20, height:20, borderRadius:'50%', border:'none', cursor:'pointer', flexShrink:0, padding:0 },
@@ -572,7 +592,7 @@ const Sidebar = ({
 // ══════════════════════════════════════════════════════════════════════════
 const styles = {
   backdrop: { position:'fixed', top:0, left:0, right:0, bottom:0, backgroundColor:'rgba(0,0,0,0.45)', zIndex:999 },
-  sidebar:  { position:'fixed', top:0, right:0, width:'360px', height:'100vh', backgroundColor:'white', boxShadow:'-2px 0 16px rgba(0,0,0,0.12)', transition:'right 0.28s ease', zIndex:1000, overflow:'hidden', display:'flex', flexDirection:'column' },
+  sidebar:  { position:'fixed', top:0, right:0, width:'min(360px, 100vw)', height:'100vh', backgroundColor:'white', boxShadow:'-2px 0 16px rgba(0,0,0,0.12)', transition:'right 0.28s ease', zIndex:1000, overflow:'hidden', display:'flex', flexDirection:'column' },
   scrollContent: { flex:1, overflowY:'auto', display:'flex', flexDirection:'column' },
   bottomBar: { flexShrink:0, borderTop:'2px solid #e5e7eb', backgroundColor:'white', padding:'8px 0' },
 

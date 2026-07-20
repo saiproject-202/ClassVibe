@@ -95,7 +95,7 @@ const TeacherProfile = ({ onClose, onOpenAnalytics, onOpenSettings }) => {
           <div style={styles.card}>
             <div style={styles.identityRow}>
               <div style={styles.avatarCircle}>{getInitials(profile.name)}</div>
-              <div>
+              <div style={{ minWidth: 0 }}>
                 <p style={styles.name}>{profile.name}</p>
                 <p style={styles.subjectLine}>{subjectLine || 'Add your subject & grade'}</p>
                 <p style={styles.schoolLine}>{tp.school || 'Add your school'}</p>

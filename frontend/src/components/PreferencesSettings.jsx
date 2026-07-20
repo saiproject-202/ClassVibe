@@ -64,7 +64,7 @@ const PreferencesSettings = ({ isDark, themeMode, setThemeMode }) => {
 
       {/* Accent Color */}
       <div style={sectionLabel}>Accent Color</div>
-      <div style={{ display: 'flex', gap: 14, marginBottom: 22 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 22 }}>
         {Object.entries(ACCENTS).map(([key, c]) => (
           <button key={key} type="button" onClick={() => handleAccentPick(key)} title={c.label}
             aria-label={c.label} aria-pressed={accentKey === key}
