@@ -87,7 +87,7 @@ const UpcomingSessions = ({ onClose }) => {
       <div style={styles.modal}>
         <div style={styles.header}>
           <h2 style={styles.title}>📅 Upcoming Sessions</h2>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         <div style={styles.content}>

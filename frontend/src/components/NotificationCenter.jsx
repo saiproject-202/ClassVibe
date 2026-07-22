@@ -204,7 +204,7 @@ const getNotificationIcon = (type) => {
         {/* Header */}
         <div style={styles.header}>
           <h3 style={styles.title}>Notifications</h3>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         {/* Controls */}

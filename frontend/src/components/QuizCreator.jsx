@@ -796,7 +796,7 @@ const QuizCreator = ({ groupId, onClose, onSuccess }) => {
         {/* Header */}
         <div style={styles.header}>
           <h2 style={styles.title}>Quiz Builder</h2>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         {/* Navigation Tabs */}

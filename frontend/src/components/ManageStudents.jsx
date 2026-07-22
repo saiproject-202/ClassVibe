@@ -162,7 +162,7 @@ const ManageStudents = ({ session, onUpdate, onClose }) => {
         {/* Header */}
         <div style={styles.header}>
           <h2 style={styles.title}>Manage Allowed Students</h2>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         {/* Session Info */}

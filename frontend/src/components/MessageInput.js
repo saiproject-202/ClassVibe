@@ -251,7 +251,7 @@ const MessageInput = ({
           <div style={S.pollModal}>
             <div style={S.pollHeader}>
               <h3 style={S.pollTitle}>Create Poll</h3>
-              <button onClick={cancelPoll} style={S.pollCloseBtn}>✕</button>
+              <button onClick={cancelPoll} style={S.pollCloseBtn} aria-label="Close">✕</button>
             </div>
             <div style={S.pollBody}>
               <label style={S.pollLabel}>Question *</label>

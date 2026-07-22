@@ -152,9 +152,10 @@ function setupQuizSocketHandlers(io, socket) {
       // (allowStudentChoice was on but they just didn't choose, or it was off entirely)
       // gets auto-assigned to whichever team is currently smallest.
       let teamRosterCounts = null;
+      let newlyAssigned = [];
       if (session.teams && session.teams.length > 0) {
         session.participants.forEach(p => {
-          if (!p.teamId) assignToSmallestTeam(session, p);
+          if (!p.teamId) { assignToSmallestTeam(session, p); newlyAssigned.push(p); }
         });
         teamRosterCounts = {};
         session.teams.forEach(t => { teamRosterCounts[t.teamId] = 0; });
@@ -165,9 +166,23 @@ function setupQuizSocketHandlers(io, socket) {
 
       await session.save();
 
-      // Let everyone see the final team rosters before the first question fires
+      // ✅ FIX (quiz lobby stuck-transition bug, root cause #2): this used to be a single
+      // aggregate-only broadcast ({userId:null, teamId:null, teamRosterCounts}), so
+      // QuizLobby's onTeamAssigned handler (which only sets myTeamId `if (data.userId)`)
+      // never learned any auto-assigned student's own team — their Lobby→Player hand-off
+      // gate (`teams.length === 0 || myTeamId`) then never passed, stranding them on the
+      // Lobby screen forever even though the quiz had actually started. Emitting one
+      // team:assigned per newly-auto-assigned student — same payload shape the manual
+      // student:selectTeam path already sends — fixes this with zero client-side changes.
       if (teamRosterCounts) {
-        io.to(sessionId).emit('team:assigned', { userId: null, teamId: null, teamRosterCounts });
+        newlyAssigned.forEach(p => {
+          io.to(sessionId).emit('team:assigned', { userId: p.user.toString(), teamId: p.teamId, teamRosterCounts });
+        });
+        // Also cover the case where every participant already had a team picked manually
+        // (newlyAssigned is empty) — still let everyone see the final roster counts.
+        if (newlyAssigned.length === 0) {
+          io.to(sessionId).emit('team:assigned', { userId: null, teamId: null, teamRosterCounts });
+        }
       }
 
       const firstQuestion = session.quiz.questions[0];
@@ -252,6 +267,11 @@ function setupQuizSocketHandlers(io, socket) {
 
     } catch (error) {
       console.error('❌ Next question error:', error);
+      // ✅ FIX (quiz lobby stuck-transition bug, root cause #6): every student-facing
+      // handler emits 'error' on failure; this one and endQuiz below only logged
+      // server-side, so an exception here was completely invisible to the teacher's
+      // UI — it would just silently fail to advance, looking identical to a stuck client.
+      socket.emit('error', { message: 'Failed to advance to the next question' });
     }
   });
 
@@ -297,6 +317,7 @@ function setupQuizSocketHandlers(io, socket) {
 
     } catch (error) {
       console.error('❌ End quiz error:', error);
+      socket.emit('error', { message: 'Failed to end the quiz' });
     }
   });
 
@@ -316,6 +337,21 @@ function setupQuizSocketHandlers(io, socket) {
   socket.on('student:joinQuiz', async (data) => {
     try {
       const { sessionId } = data;
+
+      // ✅ FIX (quiz lobby stuck-transition bug, root cause #4): every other
+      // student/teacher-facing handler in this file (teacher:startQuiz,
+      // student:selectTeam, student:chooseCelebration) guards socket.userId before
+      // using it — this one didn't. Without the guard, a join firing before the
+      // 'authenticate' round-trip completes threw on socket.userId.toString() below,
+      // caught by the outer catch — but socket.join(sessionId) (a few lines down)
+      // already ran first, so the socket ended up IN the room without the server ever
+      // recording that student as a participant. Guarding here gives a clear,
+      // client-visible reason instead of a generic 'Failed to join quiz', and avoids
+      // that partial-join state entirely.
+      if (!socket.userId) {
+        return socket.emit('error', { message: 'Not authenticated. Please refresh and try again.' });
+      }
+
       console.log(`👤 Student ${socket.userId} joining quiz ${sessionId}`);
 
       let session = await QuizSession.findById(sessionId).populate('quiz');
@@ -719,8 +755,17 @@ function setupQuizSocketHandlers(io, socket) {
           );
 
           // Someone else (e.g. the timer's own auto-fill) already recorded an entry for
-          // this question in the moment between our read and this write — nothing more to do.
-          if (updateResult.modifiedCount === 0) return;
+          // this question in the moment between our read and this write.
+          // ✅ FIX (quiz lobby stuck-transition bug, root cause #5): this used to be a
+          // bare `return` — the client's own submission is still sitting on a "waiting
+          // for the server" state with no ack ever coming, since it lost this race.
+          // Acknowledging anyway (flagged `late`) means the client never hangs; the
+          // synchronized answer:summary reveal below is what shows the true recorded
+          // answer to everyone regardless of which write actually won.
+          if (updateResult.modifiedCount === 0) {
+            socket.emit('student:answerReceived', { questionIndex, late: true });
+            return;
+          }
 
           // Keep the in-memory copy consistent for the rest of this handler (momentum calc below)
           session.participants[participantIndex].streak = currentStreak;
@@ -756,6 +801,13 @@ function setupQuizSocketHandlers(io, socket) {
 
           console.log(`✅ Answer recorded: ${isCorrect ? 'Correct' : 'Wrong'} (+${points} pts, Streak: ${currentStreak})`);
         }
+      } else {
+        // ✅ FIX (quiz lobby stuck-transition bug, root cause #5): this used to be a
+        // silent no-op — a student whose join never registered them as a participant
+        // (e.g. student:joinQuiz raced ahead of authentication before the guard added
+        // above existed) would submit an answer that vanished with zero feedback,
+        // leaving their client waiting for an ack that would never come.
+        socket.emit('error', { message: 'You are not registered for this quiz — please refresh and rejoin.' });
       }
 
     } catch (error) {

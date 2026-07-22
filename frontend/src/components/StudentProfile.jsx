@@ -86,7 +86,7 @@ const StudentProfile = ({ studentId, groupId, onClose, onBack }) => {
         <div style={styles.header}>
           <button onClick={onBack} style={styles.backBtn}>← Back</button>
           <h2 style={styles.title}>Student Profile</h2>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         <div style={styles.content}>

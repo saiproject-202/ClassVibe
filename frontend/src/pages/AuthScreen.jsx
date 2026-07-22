@@ -22,6 +22,7 @@
 // Session" box (handleStudentPinJoin in App.js, unchanged).
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useBreakpoint } from "../styles/breakpoints";
 import "./AuthScreen.css";
 import {
   register,
@@ -67,6 +68,7 @@ const GoogleIcon = () => (
 
 export default function AuthScreen({ role, onAuthSuccess, onBack, initialMode = "entry", initialToken = null }) {
   const [darkMode] = useState(localStorage.getItem("theme") === "dark");
+  const bucket = useBreakpoint(); // Design System (Phase 5)
   const copy = ROLE_COPY[role] || ROLE_COPY.student;
   const Icon = copy.icon;
 
@@ -278,13 +280,13 @@ export default function AuthScreen({ role, onAuthSuccess, onBack, initialMode = 
         theme: darkMode ? "filled_black" : "outline",
         size: "large",
         shape: "pill",
-        width: 320,
+        width: bucket === "mobile" ? 280 : 320,
         text: "continue_with"
       });
     }
     // googleClientId is a build-time env constant, not a reactive value
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [googleEnabled, mode, darkMode, handleGoogleCredential]);
+  }, [googleEnabled, mode, darkMode, handleGoogleCredential, bucket]);
 
   const appleLabel = providers?.apple?.label || "Apple";
   const phoneLabel = providers?.phone?.label || "Phone";

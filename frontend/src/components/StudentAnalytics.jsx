@@ -136,7 +136,7 @@ const StudentAnalytics = ({ groupId, onClose }) => {
             <button onClick={handleExport} style={styles.exportBtn}>
               📥 Export CSV
             </button>
-            <button onClick={onClose} style={styles.closeBtn}>✕</button>
+            <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
           </div>
         </div>
 

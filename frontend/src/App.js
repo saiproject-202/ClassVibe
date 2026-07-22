@@ -23,7 +23,6 @@ import QuizCreator from './components/QuizCreator';
 import StudentAnalytics from './components/StudentAnalytics';
 import './App.css';
 import QuizLobby from './components/QuizLobby';
-//import QuizControlPanel from './components/QuizControlPanel';
 import QuizPlayer from './components/QuizPlayer';
 import AvatarBuilder from './components/AvatarBuilder';
 import TeacherProfile from './components/TeacherProfile';
@@ -485,6 +484,32 @@ function App() {
   const currentGroupRef = useRef(null);
   useEffect(() => { currentGroupRef.current = currentGroup; }, [currentGroup]);
 
+  // ✅ FIX (quiz lobby stuck-transition bug, root cause #1): connect+authenticate the
+  // socket used to be duplicated across 3 separate call sites (resumed-session-on-reload,
+  // fresh login, PIN join), but only the resumed-session one registered a
+  // socket.on('connect', reAuth) listener. Socket.IO rooms — including a quiz session's
+  // room — don't survive a reconnect, and the backend resets socket.userId to null on
+  // every new connection (server.js io.on('connection', ...)), so 'authenticated' only
+  // fires again if the client re-emits 'authenticate' after that reconnect. Students who
+  // logged in fresh or joined by PIN never got that listener, so after ANY reconnect
+  // (routine on this app's free-tier host — see socket.js's reconnectionAttempts:
+  // Infinity comment) they silently fell out of the quiz room and never received
+  // quiz:started, regardless of quiz mode. One shared, idempotent helper used by all
+  // three call sites closes this gap everywhere at once instead of patching each copy.
+  const socketReconnectListenerRef = useRef(false);
+  const establishSocketAuth = useCallback((token) => {
+    if (!token) return;
+    if (!socket.connected) socket.connect();
+    socket.emit('authenticate', token);
+    if (!socketReconnectListenerRef.current) {
+      socketReconnectListenerRef.current = true;
+      socket.on('connect', () => {
+        const t = localStorage.getItem('token');
+        if (t) socket.emit('authenticate', t);
+      });
+    }
+  }, []);
+
   // ✅ NEW: resume an in-progress quiz on page load/reload instead of always landing on
   // Dashboard/Chat. activeQuizSession/lobbyCleared are plain React state with no
   // reload-persistence, so a reload mid-quiz used to strand the user until they
@@ -649,14 +674,7 @@ function App() {
         if (parsedUser) setUser(parsedUser);
         setIsAuthenticated(true);
         setGroupsLoading(true);
-        socket.connect();
-        socket.emit('authenticate', savedToken);
-        // Re-authenticate after socket auto-reconnect (Render cold start, network blip)
-        const reAuth = () => {
-          const t = localStorage.getItem('token');
-          if (t) socket.emit('authenticate', t);
-        };
-        socket.on('connect', reAuth);
+        establishSocketAuth(savedToken);
         // ✅ FIX (production sync): re-join the current classroom room after every
         // reconnect. Socket.IO rooms don't survive a reconnect, and this used to only
         // ever emit joinGroup when you FIRST opened a classroom — so after a reconnect
@@ -670,8 +688,8 @@ function App() {
         };
         socket.on('authenticated', reJoinGroup);
         loadGroups(parsedUser?.role === 'teacher');
-        // Cleanup returned from inside the try so it closes over reAuth/reJoinGroup.
-        return () => { socket.off('connect', reAuth); socket.off('authenticated', reJoinGroup); };
+        // Cleanup returned from inside the try so it closes over reJoinGroup.
+        return () => { socket.off('authenticated', reJoinGroup); };
       } catch (err) {
         console.error('Error restoring session:', err);
         localStorage.removeItem('token'); localStorage.removeItem('user');
@@ -679,7 +697,7 @@ function App() {
     } else {
       setAuthScreen(pinFromUrl ? 'student' : 'home');
     }
-  }, [loadGroups]);
+  }, [loadGroups, establishSocketAuth]);
 
   useEffect(() => {
     if (isAuthenticated && user?.role === 'teacher') loadScheduledSessions();
@@ -710,9 +728,9 @@ function App() {
     socket.on('sessionEnded', () => { alert('The admin has ended this session'); loadGroups(false); setCurrentGroup(null); setMessages([]); });
     socket.on('messageEdited', (msg) => setMessages(prev => prev.map(m => m._id === msg._id ? msg : m)));
     socket.on('messageDeleted', (data) => setMessages(prev => prev.map(m => m._id === data.messageId ? { ...m, isDeleted: true, content: 'This message was deleted' } : m)));
-    socket.on('quizStarted', (data) => { console.log('🎮 Quiz started:', data); alert(`Quiz started: ${data.quizTitle}!\nJoin now to participate!`); });
+    socket.on('quizStarted', (data) => console.log('🎮 Quiz started:', data));
     socket.on('nextQuestion', (data) => console.log('➡️ Next question:', data));
-    socket.on('quizEnded', (data) => { console.log('🏁 Quiz ended:', data); alert('Quiz has ended! Check your results.'); });
+    socket.on('quizEnded', (data) => console.log('🏁 Quiz ended:', data));
     socket.on('leaderboardUpdate', (data) => console.log('📊 Leaderboard updated:', data));
     return () => {
       ['newMessage','userJoined','userTyping','userStopTyping','onlineUsersUpdate','moderatedChatToggled','messagesSeen','sessionEnded',
@@ -844,7 +862,7 @@ function App() {
     if (loggedInUser) { localStorage.setItem('user', JSON.stringify(loggedInUser)); setUser(loggedInUser); }
     else { const s = localStorage.getItem('user'); if (s) setUser(JSON.parse(s)); }
     const t = token ?? localStorage.getItem('token');
-    if (t) { try { socket.connect(); socket.emit('authenticate', t); } catch (e) {} }
+    if (t) { try { establishSocketAuth(t); } catch (e) {} }
     setIsAuthenticated(true); // ← dashboard renders immediately; data loads follow async
     setGroupsLoading(true);   // skeleton shown until groups arrive
     console.log(`⏱ handleLoginSuccess: dashboard unblocked in ${(performance.now()-t0).toFixed(0)}ms`);
@@ -862,7 +880,7 @@ function App() {
     console.log(`⏱ handleGroupJoined: dashboard unblocked in ${(performance.now()-t0).toFixed(0)}ms`);
     const t = token ?? localStorage.getItem('token');
     if (t) {
-      socket.connect(); socket.emit('authenticate', t);
+      establishSocketAuth(t);
       // Guard prevents the duplicate call that previously fired from BOTH socket auth
       // AND the 1-second setTimeout — each student login was hitting getMyGroups twice.
       let groupsLoaded = false;
@@ -1398,7 +1416,7 @@ function App() {
       {/* ✅ NEW: falls back to the quiz's own group when no classroom is open (the
           "Create New Quiz" quick-quiz path never sets currentGroup) */}
       {activeQuizSession && user?.role === 'teacher' && !lobbyCleared && (
-        <QuizLobby role="teacher" groupId={currentGroup?._id || activeQuizSession?.quiz?.group} sessionId={activeQuizSession._id}
+        <QuizLobby key={activeQuizSession._id} role="teacher" groupId={currentGroup?._id || activeQuizSession?.quiz?.group} sessionId={activeQuizSession._id}
           onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
           onEnterLive={() => setLobbyCleared(true)} />
       )}
@@ -1407,6 +1425,7 @@ function App() {
           instead of the old control-panel dashboard. */}
       {activeQuizSession && user?.role === 'teacher' && lobbyCleared && (
         <QuizPlayer
+          key={activeQuizSession._id}
           sessionId={activeQuizSession._id}
           spectator
           onFinish={() => socket.emit('teacher:endQuiz', { sessionId: activeQuizSession._id })}
@@ -1414,21 +1433,21 @@ function App() {
         />
       )}
       {activeQuizSession && user?.role === 'student' && !lobbyCleared && (
-        <QuizLobby role="student" sessionId={activeQuizSession._id}
+        <QuizLobby key={activeQuizSession._id} role="student" sessionId={activeQuizSession._id}
           onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }}
           onEnterLive={() => setLobbyCleared(true)} />
       )}
       {activeQuizSession && user?.role === 'student' && lobbyCleared && (
-        <QuizPlayer sessionId={activeQuizSession._id} onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }} />
+        <QuizPlayer key={activeQuizSession._id} sessionId={activeQuizSession._id} onClose={() => { setActiveQuizSession(null); setLobbyCleared(false); }} />
       )}
 
       {/* Notification "Join Now" path — same Lobby, separate state (no full session object available) */}
       {showWaitingRoom && (
-        <QuizLobby role="student" sessionId={quizSessionId}
+        <QuizLobby key={quizSessionId} role="student" sessionId={quizSessionId}
           onClose={() => setShowWaitingRoom(false)}
           onEnterLive={() => { setShowWaitingRoom(false); setShowQuizPlayer(true); }} />
       )}
-      {showQuizPlayer && <QuizPlayer sessionId={quizSessionId} onClose={() => setShowQuizPlayer(false)} />}
+      {showQuizPlayer && <QuizPlayer key={quizSessionId} sessionId={quizSessionId} onClose={() => setShowQuizPlayer(false)} />}
 
       {/* ══════════════════════════════════════
           ✅ NEW: MANAGE SESSION MODAL

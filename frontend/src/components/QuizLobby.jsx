@@ -234,7 +234,7 @@ const QuizLobby = ({ sessionId, groupId, role, onClose, onEnterLive }) => {
             <h2 style={styles.title}>{lateJoin ? '⚡ Quiz is Live!' : '⏳ Lobby'}</h2>
             {quizTitle && <p style={styles.subtitle}>{quizTitle} · {totalQuestions} questions</p>}
           </div>
-          <button onClick={onClose} style={styles.closeBtn}>✕</button>
+          <button onClick={onClose} style={styles.closeBtn} aria-label="Close">✕</button>
         </div>
 
         {errorMsg && <div style={styles.errorBanner}>{errorMsg}</div>}

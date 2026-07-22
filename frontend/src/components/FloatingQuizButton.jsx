@@ -208,19 +208,18 @@ const FloatingQuizButton = ({
     if (onJoinQuiz) onJoinQuiz({ ...session, _id: sid });
   }, [socket, onJoinQuiz]);
 
-  // ── Listen for waitingRoom open event from ChatArea (the chat notification's
-  // "Join Quiz" button) ──────────────────────────────────────────────
-  // ✅ FIXED: this used to call onJoinQuiz(e.detail.sessionId) directly — a bare
-  // string, not the session object App.js's activeQuizSession expects — so
-  // activeQuizSession._id/.status were undefined and the student never actually
-  // transitioned past the Lobby. Routes through handleStudentJoin like the
-  // button's own click, using the button's already-tracked quizSession (same
-  // group, so it's the same session the chat banner is pointing at).
-  useEffect(() => {
-    const handler = () => { if (quizSession) handleStudentJoin(quizSession); };
-    window.addEventListener('openWaitingRoom', handler);
-    return () => window.removeEventListener('openWaitingRoom', handler);
-  }, [quizSession, handleStudentJoin]);
+  // ✅ FIX (quiz lobby stuck-transition bug, root cause #3): this component used to
+  // ALSO listen for the same 'openWaitingRoom' window event that App.js's own listener
+  // (App.js:~546) handles via quizSessionId/showWaitingRoom — so a single "Join Now"
+  // notification click mounted TWO independent <QuizLobby> instances for the same
+  // student (this one via onJoinQuiz → activeQuizSession/lobbyCleared, the other via
+  // App.js's own state), each with its own socket listeners and its own
+  // quizHasStarted/myTeamId state. Whichever instance wasn't the one actually visible
+  // could resolve or error in the background while the visible one never received the
+  // deciding event — stranding the student regardless of quiz mode. App.js's own
+  // listener is already fully sufficient on its own (the student-role Lobby it renders
+  // bootstraps purely from the quiz:joined socket ack, no session object needed up
+  // front), so this duplicate listener is removed rather than reconciled.
 
   // ── Click handler ─────────────────────────────────────────────────
   const handleClick = () => {

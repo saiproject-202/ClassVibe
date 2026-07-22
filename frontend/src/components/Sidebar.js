@@ -87,7 +87,7 @@ export const Settings = ({ onClose, onUserUpdated, isDark }) => {
         {/* Header */}
         <div style={{ ...ST.header, borderBottom: `1px solid ${mBdr}` }}>
           <h2 style={{ ...ST.title, color: mTxt }}>⚙️ Profile Settings</h2>
-          <button onClick={onClose} style={ST.closeBtn}>✕</button>
+          <button onClick={onClose} style={ST.closeBtn} aria-label="Close">✕</button>
         </div>
 
         {/* Body */}
@@ -474,7 +474,7 @@ const Sidebar = ({
                 {isDark ? '☀️' : '🌙'}
               </button>
             )}
-            <button onClick={onClose} style={{ ...styles.closeButton, color: isDark ? '#94a3b8' : '#6b7280' }}>✕</button>
+            <button onClick={onClose} style={{ ...styles.closeButton, color: isDark ? '#94a3b8' : '#6b7280' }} aria-label="Close">✕</button>
           </div>
         </div>
 
