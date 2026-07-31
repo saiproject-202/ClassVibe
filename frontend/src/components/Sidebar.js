@@ -396,6 +396,7 @@ const Sidebar = ({
   onUserUpdated,  // called with updated user object after profile save
   isDark,
   onToggleTheme,
+  onOpenAnalytics, // opens the Live Analytics overlay (App.js) — teacher only
 }) => {
   const [activeNavItem,    setActiveNavItem]    = useState('Dashboard');
   const [showSettings,     setShowSettings]     = useState(false);
@@ -433,6 +434,8 @@ const Sidebar = ({
       setShowSettings(true);
     } else if (label === 'Whiteboard') {
       setShowWhiteboard(true);
+    } else if (label === 'Live Analytics') {
+      if (typeof onOpenAnalytics === 'function') { onOpenAnalytics(); onClose(); }
     }
     // 'Participants' sets active and shows the panel below
   };
@@ -441,6 +444,7 @@ const Sidebar = ({
     { icon: '📊', label: 'Dashboard'    },
     { icon: '💬', label: 'Live Session' },
     { icon: '👥', label: 'Participants' },
+    { icon: '📈', label: 'Live Analytics', sub: 'Engagement and participation stats' },
     { icon: '⚙️', label: 'Settings'     },
     { icon: '✏️', label: 'Whiteboard', sub: 'Collaborative drawing space' },
   ];

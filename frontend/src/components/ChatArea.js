@@ -42,6 +42,31 @@ const ChatArea = ({
   const [zoomLevel,        setZoomLevel]        = useState(1);
   const [pdfViewer,        setPdfViewer]        = useState(null);
 
+  // ── Swipe-to-reply (drag a message bubble right to reply, like other chat apps) ──
+  const [dragMsg, setDragMsg] = useState(null); // { id, dx }
+  const dragStartRef = useRef({ x: 0, y: 0, active: false });
+  const REPLY_DRAG_THRESHOLD = 50;
+  const REPLY_DRAG_MAX = 70;
+
+  const handleReplyDragStart = (e) => {
+    dragStartRef.current = { x: e.clientX, y: e.clientY, active: true };
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+  };
+  const handleReplyDragMove = (e, msg) => {
+    if (!dragStartRef.current.active) return;
+    const dx = e.clientX - dragStartRef.current.x;
+    const dy = e.clientY - dragStartRef.current.y;
+    if (Math.abs(dy) > Math.abs(dx) || dx < 4) return; // vertical scroll/selection — ignore
+    setDragMsg({ id: msg._id, dx: Math.min(REPLY_DRAG_MAX, dx) });
+  };
+  const handleReplyDragEnd = (msg) => {
+    if (dragMsg && dragMsg.id === msg._id && dragMsg.dx > REPLY_DRAG_THRESHOLD && typeof onReplyToStudent === 'function') {
+      onReplyToStudent(msg.sender);
+    }
+    dragStartRef.current = { x: 0, y: 0, active: false };
+    setDragMsg(null);
+  };
+
   // ── Leaderboard ──────────────────────────────────────────────────────────
   // ▼ arrow always shows when currentGroup exists
   // lbCollapsed=true  → only arrow visible
@@ -631,25 +656,36 @@ const ChatArea = ({
                 )}
 
                 {/* Other's message — LEFT */}
-                {!isSys && !isOwn && (
-                  <div style={S.otherRow}>
-                    <LbAvatar
-                      name={message.sender?.name || message.sender?.username}
-                      avatar={message.sender?.avatar}
-                      size={32}
-                      style={{ alignSelf: 'flex-start', marginTop: 20 }}
-                    />
-                    <div style={S.otherCol}>
-                      {renderMeta(message)}
-                      <div style={{ ...S.bubble, backgroundColor: message.isDeleted ? (isDark?'#1e293b':'#f1f5f9') : (isDark?'#1e3a5f':'#ffffff'), borderColor: isDark?'#334155':'#e2e8f0', borderRadius: '3px 12px 12px 12px', opacity: message.isDeleted ? 0.65 : 1 }}>
-                        {editing ? renderEditUI() : renderContent(message)}
+                {!isSys && !isOwn && (() => {
+                  const canReply = isAdmin && moderatedChat && message.sender && !message.isDeleted && typeof onReplyToStudent === 'function';
+                  const isDragging = dragMsg?.id === message._id;
+                  const dragDx = isDragging ? dragMsg.dx : 0;
+                  return (
+                    <div style={S.otherRow}>
+                      <LbAvatar
+                        name={message.sender?.name || message.sender?.username}
+                        avatar={message.sender?.avatar}
+                        size={32}
+                        style={{ alignSelf: 'flex-start', marginTop: 20 }}
+                      />
+                      <div style={{ ...S.otherCol, position: 'relative' }}>
+                        {renderMeta(message)}
+                        {canReply && dragDx > 6 && (
+                          <span style={{ ...S.replyDragIcon, opacity: Math.min(1, dragDx / REPLY_DRAG_THRESHOLD) }}>↩</span>
+                        )}
+                        <div
+                          style={{ ...S.bubble, backgroundColor: message.isDeleted ? (isDark?'#1e293b':'#f1f5f9') : (isDark?'#1e3a5f':'#ffffff'), borderColor: isDark?'#334155':'#e2e8f0', borderRadius: '3px 12px 12px 12px', opacity: message.isDeleted ? 0.65 : 1, transform: dragDx ? `translateX(${dragDx}px)` : undefined, transition: isDragging ? 'none' : 'transform 0.2s ease', touchAction: canReply ? 'pan-y' : undefined, cursor: canReply ? 'grab' : undefined }}
+                          onPointerDown={canReply ? handleReplyDragStart : undefined}
+                          onPointerMove={canReply ? (e) => handleReplyDragMove(e, message) : undefined}
+                          onPointerUp={canReply ? () => handleReplyDragEnd(message) : undefined}
+                          onPointerCancel={canReply ? () => setDragMsg(null) : undefined}
+                        >
+                          {editing ? renderEditUI() : renderContent(message)}
+                        </div>
                       </div>
-                      {isAdmin && moderatedChat && message.sender && !message.isDeleted && typeof onReplyToStudent === 'function' && (
-                        <button onClick={() => onReplyToStudent(message.sender)} style={S.replyBtn}>↩ Reply</button>
-                      )}
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
             </React.Fragment>
           );
@@ -710,6 +746,9 @@ const ChatArea = ({
       {/* Context menu */}
       {contextMenu && (
         <div style={{ ...S.ctxMenu, top: contextMenu.y, left: contextMenu.x }}>
+          {isAdmin && moderatedChat && !contextMenu.isOwn && contextMenu.message.sender && !contextMenu.message.isDeleted && typeof onReplyToStudent === 'function' && (
+            <div style={S.ctxItem} onClick={() => { onReplyToStudent(contextMenu.message.sender); setContextMenu(null); }}>↩️ Reply</div>
+          )}
           <div style={S.ctxItem} onClick={() => copyMsg(contextMenu.message.content)}>📋 Copy</div>
           {contextMenu.isOwn && !contextMenu.message.isDeleted && (
             <>
@@ -822,7 +861,7 @@ const S = {
   modFilterChip: { padding: '4px 11px', fontSize: 12, fontWeight: '600', border: '1px solid #e2e8f0', borderRadius: 20, cursor: 'pointer', backgroundColor: 'transparent', color: '#64748b', whiteSpace: 'nowrap', flexShrink: 0 },
   modFilterChipActive: { backgroundColor: '#eef2ff', color: '#4f46e5', border: '1px solid #c7d2fe' },
   modFilterCount: { opacity: 0.7, fontWeight: '500' },
-  replyBtn:     { alignSelf: 'flex-start', marginTop: 3, padding: '2px 10px', fontSize: 11, fontWeight: '600', color: '#4f46e5', backgroundColor: 'transparent', border: '1px solid #c7d2fe', borderRadius: 12, cursor: 'pointer' },
+  replyDragIcon: { position: 'absolute', left: -26, top: '50%', transform: 'translateY(-50%)', fontSize: 18, color: '#4f46e5', pointerEvents: 'none' },
   deliveryStatus: { fontSize: 10, color: '#94a3b8', fontWeight: '500' },
 
   msgContainer: { flex: 1, overflowY: 'auto', padding: '20px 20px', display: 'flex', flexDirection: 'column', gap: 2 },

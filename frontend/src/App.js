@@ -1315,7 +1315,6 @@ function App() {
         onCreateGroup={handleCreateGroup}
         onOpenSchedule={() => setShowSchedule(true)}
         onOpenQuiz={() => setShowQuizCreator(true)}
-        onOpenAnalytics={() => setShowAnalytics(true)}
         onToggleSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
         isAdmin={isAdmin}
         groupName={currentGroup ? currentGroup.groupName : ''}
@@ -1389,6 +1388,7 @@ function App() {
         }}
         isDark={isDark}
         onToggleTheme={toggleTheme}
+        onOpenAnalytics={() => setShowAnalytics(true)}
       />
 
       {showQuizCreator && (
@@ -1654,7 +1654,7 @@ function App() {
               <BottomNav items={TEACHER_NAV_ITEMS} activeView={teacherView} onNavigate={setTeacherView} />
 
               {/* MAIN AREA */}
-              <div style={D.main}>
+              <div style={D.main} className="cv-hide-scrollbar">
 
                 {/* ═══ DASHBOARD ═══ */}
                 {teacherView === 'dashboard' && (<>
@@ -2334,6 +2334,25 @@ function App() {
                     </div>
                     <PrivacySettings isDark={isDark} />
                   </div>
+
+                  {/* Section 5: Account — Logout */}
+                  <div style={{ ...D.settingsCard, marginTop:12 }}>
+                    <div style={D.settingsCardHeader}>
+                      <div style={D.settingsCardIcon}>🚪</div>
+                      <div>
+                        <div style={D.settingsCardTitle}>Account</div>
+                        <div style={D.settingsCardSub}>Sign out of your ClassVibe account</div>
+                      </div>
+                    </div>
+                    <div style={{ padding:'16px 20px' }}>
+                      <button
+                        onClick={handleLogout}
+                        style={{ width:'100%', padding:'12px 14px', border:'1.5px solid #FCA5A5', borderRadius:'10px', background: isDark ? '#450a0a' : '#FEF2F2', fontSize:'14px', fontWeight:'700', color:'#DC2626', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}
+                      >
+                        → Logout
+                      </button>
+                    </div>
+                  </div>
                 </>)}
 
               </div>
@@ -2358,7 +2377,7 @@ function App() {
               <BottomNav items={STUDENT_NAV_ITEMS} activeView={studentView} onNavigate={setStudentView} />
 
               {/* MAIN CONTENT */}
-              <div style={SD.main}>
+              <div style={SD.main} className="cv-hide-scrollbar">
 
                 {/* ════ DASHBOARD ════ */}
                 {studentView === 'dashboard' && (<>
@@ -2887,6 +2906,25 @@ function App() {
                       </div>
                     </div>
                     <PrivacySettings isDark={isDark} />
+                  </div>
+
+                  {/* Section 5: Account — Logout */}
+                  <div style={{ ...SD.settingsCard, marginTop:12 }}>
+                    <div style={SD.settingsCardHeader}>
+                      <div style={SD.settingsCardIcon}>🚪</div>
+                      <div>
+                        <div style={SD.settingsCardTitle}>Account</div>
+                        <div style={SD.settingsCardSub}>Sign out of your ClassVibe account</div>
+                      </div>
+                    </div>
+                    <div style={{ padding:'16px 20px' }}>
+                      <button
+                        onClick={handleLogout}
+                        style={{ width:'100%', padding:'12px 14px', border:'1.5px solid #FCA5A5', borderRadius:'10px', background: isDark ? '#450a0a' : '#FEF2F2', fontSize:'14px', fontWeight:'700', color:'#DC2626', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}
+                      >
+                        → Logout
+                      </button>
+                    </div>
                   </div>
                 </>)}
 

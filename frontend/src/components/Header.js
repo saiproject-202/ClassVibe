@@ -30,7 +30,6 @@ const Header = ({
   onCreateGroup,
   onOpenSchedule,
   onOpenQuiz,
-  onOpenAnalytics,
   onToggleSidebar,
   isAdmin,
   groupName,
@@ -241,18 +240,6 @@ const Header = ({
                 {isTeacher ? 'View Session PIN & QR' : 'View Session PIN'}
               </button>
 
-              {/* Live Analytics — teacher only */}
-              {isTeacher && onOpenAnalytics && (
-                <button
-                  onClick={onOpenAnalytics}
-                  style={S.analyticsBtn}
-                  onMouseEnter={e => e.currentTarget.style.backgroundColor = '#f8fafc'}
-                  onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ffffff'}
-                >
-                  📊 Live Analytics
-                </button>
-              )}
-
               {/* Teacher Moderated Chat toggle — teacher/admin only */}
               {isAdmin && onToggleModeratedChat && (
                 <button
@@ -260,7 +247,7 @@ const Header = ({
                   style={moderatedChat ? S.modChatBtnOn : S.modChatBtnOff}
                   title={moderatedChat ? 'Moderated Chat is ON — student messages are private to you' : 'Turn on Moderated Chat — hide student messages from each other'}
                 >
-                  🛡 Moderated Chat: {moderatedChat ? 'On' : 'Off'}
+                  Moderated Chat: {moderatedChat ? 'On' : 'Off'}
                 </button>
               )}
 
@@ -272,7 +259,7 @@ const Header = ({
                   onMouseEnter={e => e.currentTarget.style.backgroundColor = '#dc2626'}
                   onMouseLeave={e => e.currentTarget.style.backgroundColor = '#ef4444'}
                 >
-                  🔴 End Session
+                  End Session
                 </button>
               )}
 
@@ -486,11 +473,6 @@ const S = {
   pinBtn: {
     padding: '7px 13px', fontSize: 12, fontWeight: '500',
     borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background 0.15s',
-  },
-  analyticsBtn: {
-    padding: '7px 13px', fontSize: 12, fontWeight: '500',
-    border: '1px solid #e2e8f0', borderRadius: 7,
-    cursor: 'pointer', whiteSpace: 'nowrap', transition: 'background 0.15s',
   },
   endBtn: {
     padding: '7px 13px', fontSize: 12, fontWeight: '700',
